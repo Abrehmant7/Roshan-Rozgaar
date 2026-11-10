@@ -7,7 +7,9 @@ in the process environment take precedence over it.
 
 from pathlib import Path
 
-from .env import env_bool, env_list, env_str, load_dotenv
+from django.core.exceptions import ImproperlyConfigured
+
+from .env import env_bool, env_int, env_list, env_str, load_dotenv
 
 BASE_DIR = Path(__file__).resolve().parent.parent  # backend/
 REPO_ROOT = BASE_DIR.parent
@@ -42,6 +44,7 @@ INSTALLED_APPS = [
     "rest_framework",
     "accounts",
     "catalog",
+    "workers",
 ]
 
 MIDDLEWARE = [
@@ -118,4 +121,28 @@ REST_FRAMEWORK = {
         "rest_framework.renderers.JSONRenderer",
         *(["rest_framework.renderers.BrowsableAPIRenderer"] if DEBUG else []),
     ],
+    "EXCEPTION_HANDLER": "config.api.exception_handler",
+    "DEFAULT_THROTTLE_RATES": {
+        "ocr_scan": env_str("OCR_SCAN_RATE", "30/hour"),
+    },
 }
+
+# Uploads that must never be publicly served (voice notes). Served only through
+# authorized API views; keep this directory out of Git and outside MEDIA_ROOT.
+PRIVATE_MEDIA_ROOT = Path(env_str("PRIVATE_MEDIA_ROOT", str(BASE_DIR / "private_media")))
+
+# ID-card OCR for worker onboarding. "mock" uses built-in fictional fixtures;
+# "live" calls the configured provider from the server (the key never reaches React).
+OCR_MODE = env_str("OCR_MODE", "mock").strip().lower()
+if OCR_MODE not in {"mock", "live"}:
+    raise ImproperlyConfigured("OCR_MODE must be 'mock' or 'live'.")
+OCR_ENDPOINT = env_str("OCR_ENDPOINT", "")
+OCR_API_KEY = env_str("OCR_API_KEY", "")
+OCR_API_KEY_HEADER = env_str("OCR_API_KEY_HEADER", "X-API-Key")
+OCR_IMAGE_FIELD = env_str("OCR_IMAGE_FIELD", "image")
+OCR_TEXT_FIELD = env_str("OCR_TEXT_FIELD", "text")
+OCR_TIMEOUT_SECONDS = env_int("OCR_TIMEOUT_SECONDS", 10)
+OCR_MAX_IMAGE_BYTES = env_int("OCR_MAX_IMAGE_BYTES", 5 * 1024 * 1024)
+if OCR_MODE == "live" and not OCR_ENDPOINT:
+    raise ImproperlyConfigured("OCR_MODE=live requires OCR_ENDPOINT.")
+SCAN_PROOF_TTL_SECONDS = env_int("SCAN_PROOF_TTL_SECONDS", 10 * 60)

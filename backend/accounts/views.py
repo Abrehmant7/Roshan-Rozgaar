@@ -4,7 +4,7 @@ The POST views are plain Django JSON views wrapped in `csrf_protect`, so CSRF
 is enforced even for anonymous login/registration requests (DRF's
 SessionAuthentication only enforces it for already-authenticated users).
 Error shape matches DRF: field errors as {"field": ["msg", ...]}, everything
-else as {"detail": "msg"}.
+else as {"detail": "msg", "code": "stable_code"}.
 """
 
 import json
@@ -29,8 +29,8 @@ DUPLICATE_USERNAME = "A user with that username already exists."
 INVALID_CREDENTIALS = "Invalid username or password."
 
 
-def _error(detail, status=400):
-    return JsonResponse({"detail": detail}, status=status)
+def _error(detail, code, status=400):
+    return JsonResponse({"detail": detail, "code": code}, status=status)
 
 
 def _json_body(request):
@@ -66,7 +66,7 @@ def csrf_token_view(request):
 def register_view(request):
     data = _json_body(request)
     if data is None:
-        return _error("Request body must be a JSON object.")
+        return _error("Request body must be a JSON object.", "invalid_json")
 
     # Only username and password are accepted. Anything else (role, is_staff,
     # ...) is rejected outright rather than silently ignored.
@@ -99,7 +99,7 @@ def register_view(request):
 def login_view(request):
     data = _json_body(request)
     if data is None:
-        return _error("Request body must be a JSON object.")
+        return _error("Request body must be a JSON object.", "invalid_json")
     if errors := _non_string_fields(data, ("username", "password")):
         return JsonResponse(errors, status=400)
 
@@ -113,7 +113,7 @@ def login_view(request):
         password=form.cleaned_data["password"],
     )
     if user is None:  # wrong username, wrong password, or inactive: same answer
-        return _error(INVALID_CREDENTIALS)
+        return _error(INVALID_CREDENTIALS, "invalid_credentials")
 
     login(request, user)
     return JsonResponse(UserSerializer(user).data)

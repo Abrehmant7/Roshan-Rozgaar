@@ -36,7 +36,10 @@ def csrf_failure(request, reason=""):
     """JSON 403 for API clients; Django's normal HTML page everywhere else (e.g. Admin)."""
     if request.path.startswith("/api/"):
         return JsonResponse(
-            {"detail": "CSRF verification failed. Fetch /api/v1/auth/csrf/ and send X-CSRFToken."},
+            {
+                "detail": "CSRF verification failed. Fetch /api/v1/auth/csrf/ and send X-CSRFToken.",
+                "code": "csrf_failed",
+            },
             status=403,
         )
     return django_csrf_failure(request, reason=reason)

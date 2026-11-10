@@ -8,4 +8,5 @@ urlpatterns = [
     path("health/", HealthView.as_view(), name="health"),
     path("auth/", include("accounts.urls")),
     path("catalog/", include("catalog.urls")),
+    path("", include("workers.urls")),
 ]

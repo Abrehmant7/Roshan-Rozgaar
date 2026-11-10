@@ -17,6 +17,7 @@ htmlcov/
 
 # Django local artefacts
 backend/media/
+backend/private_media/
 backend/staticfiles/
 *.log
 

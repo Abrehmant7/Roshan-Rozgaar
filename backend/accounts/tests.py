@@ -100,7 +100,7 @@ class LoginFlowTests(TestCase):
             response = api.post("/api/v1/auth/login/", payload)
             self.assertEqual(response.status_code, 400)
             bodies.append(response.json())
-        self.assertEqual(bodies, [{"detail": "Invalid username or password."}] * 3)
+        self.assertEqual(bodies, [{"detail": "Invalid username or password.", "code": "invalid_credentials"}] * 3)
 
     def test_login_requires_both_fields(self):
         api = AuthClient()
