@@ -1,0 +1,8 @@
+# Pinned from `pip freeze` on Python 3.13.7.
+asgiref==3.13.0
+Django==5.2.19
+djangorestframework==3.18.3
+psycopg==3.3.8
+psycopg-binary==3.3.8
+sqlparse==0.6.1
+tzdata==2026.6
