@@ -1,0 +1,230 @@
+import { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react'
+
+// [Urdu, English]. Short labels; Urdu is the default for this audience.
+const T = {
+  app_name: ['روشن روزگار', 'Roshan Rozgar'],
+  tagline: ['قریبی ہنرمند، بھروسے کے ساتھ', 'Trusted skilled workers, nearby'],
+  i_am_worker: ['میں کاریگر ہوں', 'I am a worker'],
+  i_am_worker_sub: ['کام تلاش کریں', 'Find work'],
+  i_need_worker: ['مجھے کاریگر چاہیے', 'I need a worker'],
+  i_need_worker_sub: ['قریبی کاریگر ڈھونڈیں', 'Find someone nearby'],
+  login: ['لاگ اِن', 'Log in'],
+  logout: ['لاگ آؤٹ', 'Log out'],
+  register: ['نیا اکاؤنٹ بنائیں', 'Create account'],
+  have_account: ['پہلے سے اکاؤنٹ ہے؟', 'Already have an account?'],
+  no_account: ['اکاؤنٹ نہیں ہے؟', 'No account yet?'],
+  username: ['یوزر نیم', 'Username'],
+  password: ['پاس ورڈ', 'Password'],
+  worker_login_title: ['کاریگر لاگ اِن', 'Worker log in'],
+  customer_login_title: ['گاہک لاگ اِن', 'Customer log in'],
+  worker_login_note: ['کاریگر اکاؤنٹ عملہ بناتا ہے۔ اپنا یوزر نیم اور پاس ورڈ لکھیں۔', 'Worker accounts are set up by staff. Enter the username and password you were given.'],
+  wrong_role_worker: ['یہ گاہک کا اکاؤنٹ ہے', 'This is a customer account'],
+  wrong_role_customer: ['یہ کاریگر کا اکاؤنٹ ہے', 'This is a worker account'],
+  back: ['واپس', 'Back'],
+  next: ['آگے', 'Next'],
+  save: ['محفوظ کریں', 'Save'],
+  retry: ['دوبارہ کوشش', 'Try again'],
+  loading: ['لوڈ ہو رہا ہے…', 'Loading…'],
+  refresh: ['تازہ کریں', 'Refresh'],
+  optional: ['اختیاری', 'optional'],
+  cancel: ['منسوخ', 'Cancel'],
+  // navigation
+  nav_home: ['گھر', 'Home'],
+  nav_jobs: ['نئے کام', 'Jobs'],
+  nav_history: ['میرے کام', 'My jobs'],
+  nav_find: ['تلاش', 'Find'],
+  nav_requests: ['میری درخواستیں', 'My requests'],
+  // onboarding
+  onb_title: ['اپنی پروفائل بنائیں', 'Create your profile'],
+  onb_edit_title: ['پروفائل تبدیل کریں', 'Edit profile'],
+  scan_title: ['شناختی کارڈ کی تصویر لیں', 'Take a photo of your ID card'],
+  scan_hint: ['پورا کارڈ روشنی میں صاف نظر آئے', 'Whole card, in good light'],
+  scan_button: ['کیمرہ کھولیں', 'Open camera'],
+  scanning: ['کارڈ پڑھا جا رہا ہے…', 'Reading the card…'],
+  scan_ok: ['کارڈ پڑھ لیا گیا', 'Card read'],
+  is_this_you: ['کیا یہ آپ ہیں؟', 'Is this you?'],
+  yes_me: ['جی ہاں، یہ میں ہوں', 'Yes, this is me'],
+  mock_badge: ['فرضی آزمائشی اسکین (ڈیمو)', 'Simulated demo scan'],
+  mock_badge_note: ['اصل شناخت کی تصدیق نہیں ہوئی', 'No real identity check was made'],
+  pick_trades: ['آپ کیا کام کرتے ہیں؟', 'What work do you do?'],
+  pick_specialties: ['خاص مہارت (چاہیں تو)', 'Special skills (optional)'],
+  pick_areas: ['کن علاقوں میں جا سکتے ہیں؟', 'Which areas can you go to?'],
+  your_name: ['آپ کا نام', 'Your name'],
+  experience: ['تجربہ (سال)', 'Experience (years)'],
+  years: ['سال', 'years'],
+  save_profile: ['پروفائل محفوظ کریں', 'Save profile'],
+  choose_one: ['کم از کم ایک چنیں', 'Choose at least one'],
+  // worker home
+  hello: ['السلام علیکم', 'Hello'],
+  make_profile: ['پروفائل بنائیں', 'Create profile'],
+  make_profile_note: ['کام لینے کے لیے پہلے پروفائل بنائیں', 'Create your profile to start getting jobs'],
+  status_available: ['آپ کام کے لیے دستیاب ہیں', 'You are available for work'],
+  status_paused: ['آپ نے کام روکا ہوا ہے', 'You have paused new work'],
+  status_busy: ['آپ ایک کام پر ہیں', 'You are on a job'],
+  taking_jobs: ['نئے کام لے رہا ہوں', 'Taking new jobs'],
+  active_job: ['موجودہ کام', 'Current job'],
+  open_job: ['کام کھولیں', 'Open job'],
+  see_jobs: ['نئے کام دیکھیں', 'See new jobs'],
+  jobs_done: ['مکمل کام', 'Jobs done'],
+  rating: ['ریٹنگ', 'Rating'],
+  new_worker: ['نئے کاریگر', 'New worker'],
+  pending_quotes: ['بھیجی گئی قیمتیں', 'Quotes sent'],
+  recent_jobs: ['حالیہ کام', 'Recent jobs'],
+  edit_profile: ['پروفائل تبدیل کریں', 'Edit profile'],
+  // board / jobs
+  board_title: ['آپ کے علاقے کے نئے کام', 'New jobs in your areas'],
+  board_empty: ['ابھی کوئی نیا کام نہیں۔ تھوڑی دیر بعد دیکھیں۔', 'No new jobs right now. Check again soon.'],
+  board_unavailable: ['آپ ابھی قیمت نہیں بھیج سکتے (مصروف یا کام روکا ہوا)', 'You cannot quote right now (busy or paused)'],
+  voice_note: ['آواز کا پیغام', 'Voice note'],
+  play: ['سنیں', 'Play'],
+  your_quote: ['آپ کی قیمت', 'Your quote'],
+  send_quote: ['قیمت بھیجیں', 'Send quote'],
+  quote_amount: ['کتنے روپے؟', 'How many rupees?'],
+  quote_message: ['پیغام (چنیں)', 'Message (tap one)'],
+  msg_today: ['آج آ سکتا ہوں', 'I can come today'],
+  msg_hour: ['ایک گھنٹے میں آ سکتا ہوں', 'I can come within an hour'],
+  msg_tomorrow: ['کل صبح آ سکتا ہوں', 'I can come tomorrow morning'],
+  msg_materials: ['سامان کی قیمت الگ ہوگی', 'Materials cost extra'],
+  quote_sent: ['قیمت بھیج دی گئی', 'Quote sent'],
+  q_PENDING: ['جواب کا انتظار', 'Waiting for reply'],
+  q_ACCEPTED: ['منظور ہو گئی', 'Accepted'],
+  q_NOT_SELECTED: ['کسی اور کو ملا', 'Not selected'],
+  go_to_booking: ['بکنگ کھولیں', 'Open booking'],
+  history_empty: ['ابھی کوئی کام نہیں', 'No jobs yet'],
+  // statuses
+  s_OPEN: ['کھلی', 'Open'],
+  s_BOOKED: ['بک ہو گیا', 'Booked'],
+  s_IN_PROGRESS: ['کام جاری', 'In progress'],
+  s_COMPLETED: ['مکمل', 'Completed'],
+  step_booked: ['بکنگ', 'Booked'],
+  step_arrived: ['پہنچ گئے', 'Arrived'],
+  step_done: ['مکمل', 'Done'],
+  // booking
+  agreed_price: ['طے شدہ قیمت', 'Agreed price'],
+  customer: ['گاہک', 'Customer'],
+  worker: ['کاریگر', 'Worker'],
+  address: ['پتہ', 'Address'],
+  enter_pin: ['گاہک سے 6 ہندسوں کا PIN لیں', 'Get the 6-digit PIN from the customer'],
+  check_in: ['پہنچنے کی تصدیق', 'Confirm arrival'],
+  pin_attempts: ['باقی کوششیں', 'Tries left'],
+  complete_job: ['کام مکمل ہو گیا', 'Job is done'],
+  confirm_complete: ['کیا کام مکمل ہو گیا ہے؟', 'Is the job finished?'],
+  issue_pin: ['آمد کا PIN بنائیں', 'Create arrival PIN'],
+  pin_title: ['کاریگر کے پہنچنے پر یہ PIN بتائیں', 'Tell the worker this PIN when they arrive'],
+  pin_expires: ['ختم ہونے کا وقت', 'Expires at'],
+  pin_active: ['PIN بنا ہوا ہے', 'A PIN is active'],
+  new_pin: ['نیا PIN بنائیں', 'Create a new PIN'],
+  wait_checkin: ['کاریگر کے پہنچنے کا انتظار', 'Waiting for the worker to arrive'],
+  in_progress_note: ['کام جاری ہے', 'Work is in progress'],
+  done_note: ['کام مکمل ہو گیا', 'Job completed'],
+  // review / report
+  review_title: ['کام کیسا رہا؟', 'How was the job?'],
+  review_text: ['کچھ لکھنا چاہیں؟', 'Anything to add?'],
+  submit_review: ['ریٹنگ بھیجیں', 'Send rating'],
+  your_review: ['آپ کی ریٹنگ', 'Your rating'],
+  report: ['مسئلہ رپورٹ کریں', 'Report a problem'],
+  report_title: ['کیا مسئلہ ہوا؟', 'What went wrong?'],
+  report_details: ['تفصیل', 'Details'],
+  submit_report: ['رپورٹ بھیجیں', 'Send report'],
+  report_sent: ['رپورٹ بھیج دی گئی۔ عملہ دیکھے گا۔', 'Report sent. Staff will review it.'],
+  report_private: ['یہ رپورٹ صرف عملہ دیکھے گا', 'Only staff can see this report'],
+  r_OPEN: ['زیرِ غور', 'Under review'],
+  r_RESOLVED: ['حل ہو گئی', 'Resolved'],
+  r_DISMISSED: ['بند کر دی گئی', 'Closed'],
+  // customer
+  find_title: ['کس کام کے لیے کاریگر چاہیے؟', 'What do you need help with?'],
+  choose_area: ['آپ کا علاقہ', 'Your area'],
+  choose_specialty: ['کون سا کام؟ (اختیاری)', 'Which job? (optional)'],
+  any_specialty: ['کوئی بھی', 'Any'],
+  search: ['کاریگر تلاش کریں', 'Find workers'],
+  results_title: ['دستیاب کاریگر', 'Available workers'],
+  no_workers: ['اس وقت اس علاقے میں کوئی دستیاب کاریگر نہیں۔ پھر بھی درخواست بھیج دیں، کاریگر دیکھ لیں گے۔', 'No one is available in this area right now. Post a request anyway and workers will see it.'],
+  matches_skill: ['یہی مہارت', 'Skill match'],
+  verified: ['شناخت شدہ', 'ID checked'],
+  verified_demo: ['شناخت (ڈیمو)', 'ID (demo)'],
+  exp_years: ['سال تجربہ', 'yrs experience'],
+  post_request: ['کام کی درخواست بھیجیں', 'Post a job request'],
+  describe: ['کام بتائیں', 'Describe the job'],
+  describe_hint: ['لکھیں، یا نیچے آواز ریکارڈ کریں', 'Type, or record your voice below'],
+  address_label: ['پتہ اور آنے کا طریقہ', 'Address and directions'],
+  address_hint: ['صرف بکنگ کے بعد منتخب کاریگر دیکھے گا', 'Only the booked worker sees this, after you accept'],
+  record: ['آواز ریکارڈ کریں', 'Record voice'],
+  stop: ['روکیں', 'Stop'],
+  recording: ['ریکارڈنگ…', 'Recording…'],
+  delete_recording: ['ریکارڈنگ ختم کریں', 'Delete recording'],
+  mic_denied: ['مائیک کی اجازت نہیں ملی۔ آواز کی فائل چن لیں یا لکھ دیں۔', 'Microphone permission was denied. Choose an audio file or type instead.'],
+  mic_unsupported: ['یہ براؤزر ریکارڈنگ نہیں کر سکتا۔ آواز کی فائل چنیں یا لکھیں۔', 'This browser cannot record. Choose an audio file or type instead.'],
+  choose_audio: ['آواز کی فائل چنیں', 'Choose audio file'],
+  send_request: ['درخواست بھیجیں', 'Send request'],
+  need_text_or_voice: ['کام لکھیں یا آواز ریکارڈ کریں', 'Type the job or record a voice note'],
+  my_requests: ['میری درخواستیں', 'My requests'],
+  requests_empty: ['ابھی کوئی درخواست نہیں', 'No requests yet'],
+  quotes: ['قیمتیں', 'Quotes'],
+  quotes_count: ['قیمتیں موصول', 'quotes'],
+  no_quotes: ['ابھی کوئی قیمت نہیں آئی۔ کاریگر دیکھ رہے ہیں…', 'No quotes yet. Workers are looking…'],
+  accept: ['منظور کریں', 'Accept'],
+  worker_busy: ['ابھی مصروف', 'Busy now'],
+  view_profile: ['پروفائل', 'Profile'],
+  reviews: ['رائے', 'Reviews'],
+  no_reviews: ['ابھی کوئی رائے نہیں', 'No reviews yet'],
+  request_details: ['درخواست', 'Request'],
+  booked_with: ['بکنگ', 'Booked with'],
+  // errors (by backend code)
+  err_network: ['انٹرنیٹ یا سرور سے رابطہ نہیں ہوا', 'Could not reach the server'],
+  err_invalid_credentials: ['یوزر نیم یا پاس ورڈ غلط ہے', 'Wrong username or password'],
+  err_id_not_found: ['کارڈ صاف نظر نہیں آیا۔ روشنی میں دوبارہ تصویر لیں۔', 'Could not read the card. Retake the photo in good light.'],
+  err_id_not_registered: ['یہ شناختی نمبر ریکارڈ میں نہیں ملا', 'This ID number was not found in the registry'],
+  err_identity_in_use: ['یہ کارڈ پہلے کسی اور اکاؤنٹ سے جڑا ہے', 'This card is already linked to another account'],
+  err_ocr_unavailable: ['ابھی کارڈ نہیں پڑھا جا سکا۔ دوبارہ کوشش کریں۔', 'Could not read the card right now. Please try again.'],
+  err_pin_incorrect: ['غلط PIN', 'Wrong PIN'],
+  err_pin_expired: ['PIN کا وقت ختم۔ گاہک سے نیا PIN لیں۔', 'PIN expired. Ask the customer for a new one.'],
+  err_pin_locked: ['بہت غلط کوششیں۔ گاہک سے نیا PIN لیں۔', 'Too many wrong tries. Ask for a new PIN.'],
+  err_no_active_pin: ['گاہک سے PIN بنوائیں', 'Ask the customer to create a PIN'],
+  err_worker_unavailable: ['یہ کاریگر ابھی دستیاب نہیں', 'This worker is not available right now'],
+  err_request_already_booked: ['اس درخواست پر پہلے ہی بکنگ ہو چکی', 'This request is already booked'],
+  err_request_not_open: ['یہ کام اب کھلا نہیں', 'This job is no longer open'],
+  err_quote_exists: ['آپ پہلے ہی قیمت بھیج چکے ہیں', 'You already sent a quote'],
+  err_check_in_required: ['پہلے PIN سے آمد کی تصدیق کریں', 'Confirm arrival with the PIN first'],
+  err_profile_incomplete: ['پہلے پروفائل مکمل کریں', 'Finish your profile first'],
+  err_throttled: ['بہت زیادہ کوششیں۔ تھوڑی دیر بعد۔', 'Too many attempts. Try again later.'],
+  err_pin_issue_throttled: ['بہت زیادہ PIN بنائے گئے۔ چند منٹ بعد۔', 'Too many PINs. Wait a few minutes.'],
+  err_review_exists: ['ریٹنگ پہلے دی جا چکی', 'Already rated'],
+  err_report_exists: ['رپورٹ پہلے بھیجی جا چکی', 'Already reported'],
+  err_permission_denied: ['آپ کو اس کی اجازت نہیں', 'You are not allowed to do this'],
+  err_not_found: ['یہ چیز نہیں ملی یا آپ کی نہیں', 'Not found'],
+  err_voice_note_missing: ['آواز کا پیغام دستیاب نہیں', 'Voice note is not available'],
+  err_generic: ['کچھ غلط ہو گیا۔ دوبارہ کوشش کریں۔', 'Something went wrong. Please try again.'],
+}
+
+const LangCtx = createContext(null)
+
+function initialLang() {
+  try {
+    return localStorage.getItem('rr.lang') || 'ur'
+  } catch {
+    return 'ur'
+  }
+}
+
+export function LangProvider({ children }) {
+  const [lang, setLang] = useState(initialLang)
+  useEffect(() => {
+    document.documentElement.lang = lang
+    document.documentElement.dir = lang === 'ur' ? 'rtl' : 'ltr'
+    try { localStorage.setItem('rr.lang', lang) } catch { /* private mode */ }
+  }, [lang])
+  const t = useCallback((key) => (T[key] ? T[key][lang === 'ur' ? 0 : 1] : key), [lang])
+  const name = useCallback((obj) => (obj ? (lang === 'ur' && obj.name_ur) || obj.name_en : ''), [lang])
+  const errorText = useCallback((err) => {
+    if (!err) return null
+    const key = `err_${err.code}`
+    if (T[key]) return t(key)
+    return err.body?.detail || t('err_generic')
+  }, [t])
+  const value = useMemo(() => ({ lang, setLang, t, name, errorText }), [lang, t, name, errorText])
+  return <LangCtx.Provider value={value}>{children}</LangCtx.Provider>
+}
+
+export function useLang() {
+  return useContext(LangCtx)
+}

@@ -1,5 +1,8 @@
 import logging
 
+from django.conf import settings
+from django.http import FileResponse, HttpResponse
+
 from django.db import connection
 from django.http import JsonResponse
 from django.views.csrf import csrf_failure as django_csrf_failure
@@ -43,3 +46,20 @@ def csrf_failure(request, reason=""):
             status=403,
         )
     return django_csrf_failure(request, reason=reason)
+
+
+def spa_index(request):
+    """Serve frontend/dist/index.html for client-side routes (same-origin deployment)."""
+    index = settings.FRONTEND_DIST / "index.html"
+    if not index.is_file():
+        return HttpResponse(
+            "Frontend not built. Run `npm run build` in frontend/, or use the Vite dev server on :5173.",
+            status=404, content_type="text/plain",
+        )
+    response = FileResponse(index.open("rb"), content_type="text/html")
+    response["Cache-Control"] = "no-cache"
+    return response
+
+
+def api_not_found(request):
+    return JsonResponse({"detail": "Not found.", "code": "not_found"}, status=404)

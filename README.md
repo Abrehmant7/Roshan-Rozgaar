@@ -57,6 +57,19 @@ python backend\manage.py seed_demo
 python backend\manage.py runserver
 ```
 
+### Frontend (React + Tailwind, `frontend/`)
+
+```powershell
+cd frontend
+npm install
+npm run dev      # http://localhost:5173 — proxies /api to Django on 127.0.0.1:8000
+# or, one origin served by Django itself:
+npm run build    # writes frontend/dist; restart runserver, then open http://127.0.0.1:8000/
+```
+
+Requires Node 20+ (developed on Node 24.12). Use the same host consistently in development
+(`localhost:5173` and `127.0.0.1:5173` are both CSRF-trusted in `.env.example`).
+
 Then open <http://127.0.0.1:8000/api/v1/health/> — expect `{"status":"ok","database":"ok"}`.
 
 If `Activate.ps1` is blocked by execution policy, run

@@ -106,6 +106,9 @@ USE_TZ = True
 
 STATIC_URL = "static/"
 STATIC_ROOT = BASE_DIR / "staticfiles"
+# The production React build (vite base "/static/") is served from here on the same origin.
+FRONTEND_DIST = REPO_ROOT / "frontend" / "dist"
+STATICFILES_DIRS = [FRONTEND_DIST] if FRONTEND_DIST.is_dir() else []
 MEDIA_URL = "media/"
 MEDIA_ROOT = BASE_DIR / "media"
 

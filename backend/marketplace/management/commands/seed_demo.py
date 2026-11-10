@@ -94,9 +94,11 @@ class Command(BaseCommand):
             for row in OPEN_REQUESTS:
                 self._open_request(users, *row)
             if reset_onboarding:
-                n, _ = WorkerProfile.objects.filter(user__username__in=FRESH_WORKERS).delete()
+                profiles = WorkerProfile.objects.filter(user__username__in=FRESH_WORKERS)
+                n = profiles.count()
+                profiles.delete()
                 ScanProof.objects.filter(user__username__in=FRESH_WORKERS).delete()
-                self.stdout.write(f"reset onboarding for {', '.join(FRESH_WORKERS)} ({n} profile rows removed)")
+                self.stdout.write(f"reset onboarding for {', '.join(FRESH_WORKERS)} ({n} profile(s) removed)")
         self.stdout.write(f"created: {', '.join(self.created) or 'nothing (already seeded)'}")
         self.stdout.write(self.style.SUCCESS("Demo seed complete. All data is fictional and demo-only."))
 
