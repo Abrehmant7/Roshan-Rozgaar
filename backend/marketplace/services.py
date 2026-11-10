@@ -19,7 +19,7 @@ from rest_framework import status
 from config.api import ApiError, conflict
 from workers.models import WorkerProfile
 
-from . import access
+from . import access, selectors
 from .models import ArrivalPin, Booking, BookingStatus, JobRequest, Quote, Report, Review
 
 
@@ -79,6 +79,12 @@ def accept_quote(customer, quote_id):
             raise conflict("Another quote was already accepted for this request.", "request_already_booked")
         if not WorkerProfile.objects.available().filter(user_id=quote.worker_id).exists():
             raise _worker_unavailable()
+        # Re-read the profile's coverage under the lock: the worker may have dropped
+        # this trade or area after quoting.
+        if not WorkerProfile.objects.filter(selectors.covering(job), user_id=quote.worker_id).exists():
+            raise conflict(
+                "This worker no longer offers this trade in this service area.", "worker_not_eligible"
+            )
         try:
             with transaction.atomic():
                 booking = Booking.objects.create(

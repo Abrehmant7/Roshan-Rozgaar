@@ -59,9 +59,12 @@ export default function Login() {
         {notice && <p className="text-amber-800">{notice}</p>}
         <Button type="submit" icon={LogIn} busy={busy}>{t('login')}</Button>
       </Card>
-      {role === 'customer' && (
-        <p className="text-center">{t('no_account')} <Link className="font-bold text-brand underline" to="/register">{t('register')}</Link></p>
-      )}
+      <p className="text-center">
+        {t('no_account')}{' '}
+        <Link className="font-bold text-brand underline" to={role === 'worker' ? '/register?role=worker' : '/register'}>
+          {t(role === 'worker' ? 'create_worker_account' : 'register')}
+        </Link>
+      </p>
     </form>
   )
 }

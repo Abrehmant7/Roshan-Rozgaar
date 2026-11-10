@@ -26,6 +26,7 @@ from .serializers import (
     QuoteCreateSerializer,
     booking_payload,
     iso,
+    owner_quote_payloads,
     public_workers,
     quote_payload,
     worker_summary,
@@ -163,6 +164,8 @@ class JobQuotesView(APIView):
         job, rel = _visible_job(request.user, pk)
         quotes = job.quotes.all() if rel == access.OWNER else job.quotes.filter(worker=request.user)
         quotes = list(quotes.select_related("job__booking"))
+        if rel == access.OWNER:
+            return Response(owner_quote_payloads(job, quotes))
         cards = public_workers({q.worker_id for q in quotes})
         return Response([quote_payload(q, cards.get(q.worker_id)) for q in quotes])
 

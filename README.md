@@ -4,8 +4,8 @@ A mobile-first, hyper-local marketplace that connects households in Islamabad wi
 trade workers — electricians, plumbers, AC technicians, carpenters — built for workers who do not
 read or type comfortably.
 
-- **Workers** sign in with a staff-provisioned account, photograph their ID card (OCR fills in and
-  verifies their identity), pick trades, skills and sectors by tapping icons, and toggle whether they
+- **Workers** create their own account (or use one staff provisioned), photograph their ID card
+  (OCR reads the ID number, which is matched against a fictional demo registry), pick trades, skills and sectors by tapping icons, and toggle whether they
   are taking work. They browse nearby jobs, listen to voice notes, quote with preset amounts, check
   in with the customer's PIN and mark the job done.
 - **Customers** pick a trade and sector, see available verified workers ranked by skill match and
@@ -30,7 +30,7 @@ The UI is Urdu-first (right-to-left, Noto Nastaliq Urdu) with an English toggle.
 
 | Component | Barrier it removes | Status |
 | --- | --- | --- |
-| **ID-card OCR** (server-side adapter, `backend/workers/ocr.py`) | Literacy: a worker creates a verified profile from one photo instead of filling a form. Without it, onboarding falls back to typing a name and ID number. | **Mock mode is what runs in the demo** (`OCR_MODE=mock`): it returns fixed text for fictional cards and the UI shows a "simulated demo scan" label. **Live mode is implemented but not verified** — the team's PicToText endpoint contract and credentials were not available in the repository, so the adapter's request/response shape is configurable by env vars (`OCR_ENDPOINT`, `OCR_API_KEY`, `OCR_API_KEY_HEADER`, `OCR_IMAGE_FIELD`, `OCR_TEXT_FIELD`, `OCR_TIMEOUT_SECONDS`) and covered only by mocked-network tests. |
+| **ID-card OCR** — [PicToText](https://pictotext.io/docs/reference/asia/pakistan/id-card), called server-side by `backend/workers/ocr.py` | Literacy: a worker creates a profile from one photo instead of filling a form. Without it, onboarding falls back to typing a name and ID number. | **Live adapter implements the PicToText contract** (`POST https://pictotext.io/api/v1/ocr`, `Authorization: Bearer <key>`, multipart `image` + `documentType=pk_id_card`, top-level `idNumber`). Verified against the real service up to the account: the key authenticates, but the account currently answers **HTTP 402 `INSUFFICIENT_CREDITS`**, so a successful live read is **unverified** until credits are added. **Mock mode** (`OCR_MODE=mock`) runs the demo and shows a "simulated demo scan" label. Either way, the ID is matched against a **fictional** registry and labelled as such. |
 | Urdu read-aloud | Literacy: speaker buttons read headings aloud | Uses the browser's built-in speech synthesis; shown only when the device has an Urdu voice. No external service. |
 
 There is **no speech recognition**: voice notes are recorded and played back for a human to listen
@@ -119,13 +119,16 @@ Health check: <http://127.0.0.1:8000/api/v1/health/> → `{"status":"ok","databa
 
 ```powershell
 python backend\manage.py check
-python backend\manage.py test accounts catalog workers marketplace   # 83 tests, real PostgreSQL
+python backend\manage.py test accounts catalog workers marketplace   # 107 tests, real PostgreSQL
 cd frontend; npm run build; cd ..
 ```
 
 Pass the app labels when running from the repo root. Tests create a temporary `test_<DB_NAME>`
 database (the Compose user has `CREATEDB`). They include PostgreSQL concurrency races (competing
-quote acceptances, one worker booked on two requests at once).
+quote acceptances, one worker booked on two requests at once, case-variant signups). Tests always
+use mock OCR (`config.test_runner.OfflineOcrRunner`) even when `.env` selects live, so they never
+spend PicToText credits; the live adapter is tested against PicToText's documented responses with
+the network faked.
 
 Browser end-to-end tests (phone-sized, two independent sessions) drive the real UI and API. They
 need Playwright (`pip install playwright`) and Microsoft Edge, and they create data, so run them
@@ -136,7 +139,13 @@ python backend\manage.py seed_demo --reset-onboarding
 python scripts\e2e\two_role_walkthrough.py http://127.0.0.1:8000
 python backend\manage.py seed_demo --reset-onboarding
 python scripts\e2e\worker_flow.py http://127.0.0.1:8000
+# loading/retry/session/logout/stale-data/signup checks; run against Vite dev AND the build:
+python scripts\e2e\regression_checks.py http://localhost:5173 dev
+python scripts\e2e\regression_checks.py http://127.0.0.1:8000 prod
 ```
+
+Run the Django server for these with `OCR_MODE=mock` (e.g. `$env:OCR_MODE="mock"` in PowerShell
+before `runserver`); process environment variables override `.env`.
 
 ## Demo accounts (local, demo-only)
 
@@ -156,8 +165,36 @@ python scripts\e2e\worker_flow.py http://127.0.0.1:8000
 | `demo_staff` | staff | Django Admin: catalog, users, report queue |
 
 To show onboarding again: `python backend\manage.py seed_demo --reset-onboarding` (removes only
-the profiles of `demo_imran` and `demo_tariq`). New worker accounts are created by staff in
-**Admin → Users → Add user** with **Role = Worker** (public sign-up always creates customers).
+the profiles of `demo_imran` and `demo_tariq`).
+
+**New workers** sign up themselves: worker login → "نیا کاریگر اکاؤنٹ بنائیں" (`/register?role=worker`,
+API `POST /api/v1/auth/register/worker/`). The server sets the worker role; the account lands on
+`/w/onboard` and stays out of discovery and quoting until the ID scan and profile are complete.
+Staff can still create workers in **Admin → Users → Add user** (Role = Worker); staff and
+superuser flags are only ever set in Admin.
+
+## Live OCR (PicToText) — local settings
+
+Put these in the git-ignored root `.env` (see `.env.example`):
+
+```
+OCR_MODE=live
+OCR_ENDPOINT=https://pictotext.io/api/v1/ocr
+OCR_DOCUMENT_TYPE=pk_id_card
+OCR_TIMEOUT_SECONDS=25
+OCR_API_KEY=<your PicToText key>
+```
+
+Restart `runserver` after editing. `python backend\manage.py check` warns (`workers.W001`) if live
+mode has no key. The key is used only in the server's `Authorization` header; it is never returned,
+logged, sent to React or committed. Scan errors are explicit: `ocr_not_configured` (no key or bad
+document type), `ocr_auth_rejected` (401/403), `ocr_quota_exceeded` (402 credits, 429 rate),
+`image_rejected` (400 bad image), `ocr_timeout`, `ocr_unavailable` (5xx/network), `id_not_found`
+(no `idNumber`), `id_not_registered` (not in the fictional registry), `identity_in_use`.
+
+Live mode reads real photos, so the number on the card must be one of the fictional registry
+numbers (`00000-000000N-N`, N = 1…9, e.g. `00000-0000007-7` → "Faisal Mahmood"). Use a printed or
+on-screen **fictional** card marked as a demo — never a real CNIC. Switch back with `OCR_MODE=mock`.
 
 ## Demo walkthrough (two phones or two browser windows)
 
@@ -189,8 +226,8 @@ the profiles of `demo_imran` and `demo_tariq`). New worker accounts are created 
 | `DJANGO_CSRF_TRUSTED_ORIGINS` | Comma-separated origins (e.g. the Vite dev server). |
 | `DJANGO_SECURE_COOKIES` | `true` behind HTTPS (Secure session/CSRF cookies). Default `false`. |
 | `DB_NAME`, `DB_USER`, `DB_PASSWORD`, `DB_HOST`, `DB_PORT` | PostgreSQL; also initialise the Compose container. |
-| `OCR_MODE` | `mock` (default) or `live`. |
-| `OCR_ENDPOINT`, `OCR_API_KEY`, `OCR_API_KEY_HEADER`, `OCR_IMAGE_FIELD`, `OCR_TEXT_FIELD`, `OCR_TIMEOUT_SECONDS` | Live OCR provider (server-side only; the key never reaches the browser). |
+| `OCR_MODE` | `mock` (default) or `live` (PicToText). |
+| `OCR_ENDPOINT`, `OCR_DOCUMENT_TYPE`, `OCR_API_KEY`, `OCR_TIMEOUT_SECONDS` | PicToText endpoint (`https://pictotext.io/api/v1/ocr`), `pk_id_card`, Bearer key (server-side only), timeout (25 s). |
 | `OCR_MAX_IMAGE_BYTES`, `OCR_SCAN_RATE`, `SCAN_PROOF_TTL_SECONDS` | Scan limits (5 MB, 30/hour, 10 min). |
 | `VOICE_NOTE_MAX_BYTES` | Voice note cap (5 MB). |
 | `PIN_TTL_SECONDS`, `PIN_MAX_ATTEMPTS`, `PIN_ISSUE_LIMIT`, `PIN_ISSUE_WINDOW_SECONDS` | Arrival PIN: 15 min, 5 tries, 5 PINs per 15 min. |
@@ -215,16 +252,20 @@ unbooked request reports `OPEN`.
   each; Islamabad sectors G-11, G-13, I-10, F-10, G-9, I-8. Urdu labels are starter translations.
 - **Demo data** (`seed_demo`): the accounts above, four ready worker profiles marked as
   *simulated verification*, four completed past jobs with reviews, one open carpentry request.
-- **OCR**: mock mode with fixtures chosen by file-name keyword — `card-1`…`card-6` (fictional
-  registry cards; default `card-5`), `blurry` (unreadable), `unregistered` (not in registry),
-  `ocr-error` (provider failure). All IDs use the non-existent `00000-` prefix. The image and raw
-  ID number are never stored, logged or returned (only a masked form and a keyed digest).
-- **Identity registry**: a hard-coded fictional list, standing in for a government lookup.
+- **OCR**: mock mode with fixtures chosen by file-name keyword — `card-1`…`card-9` (fictional
+  registry cards), no keyword → the first fictional card not yet linked to another worker,
+  `blurry` (unreadable), `unregistered` (not in registry), `ocr-error` (provider failure). All IDs
+  use the non-existent `00000-` prefix. The image and raw ID number are never stored, logged or
+  returned (only a masked form and a keyed digest). Live mode sends the image to PicToText.
+- **Identity registry**: a hard-coded fictional list (9 people), standing in for a government
+  lookup. Every match is labelled "fictional demo registry" in the app and `"registry": "fictional"`
+  in the API, including when PicToText read the card live.
 - **Payments**: none. The agreed price is recorded; money changes hands outside the app.
 
 ## Known limitations
 
-- Live OCR is untested against a real provider (see *Use of AI*).
+- A successful live PicToText read is unverified: the configured account returns HTTP 402
+  `INSUFFICIENT_CREDITS` (see *Use of AI*).
 - Voice notes are not transcribed or translated; no speech recognition.
 - Location is manual sector selection; no maps or distance ranking. One city (Islamabad) is seeded.
 - No cancellation flow: a booking stuck in `BOOKED` (e.g. a no-show) is corrected by staff in
@@ -232,7 +273,8 @@ unbooked request reports `OPEN`.
 - Updates arrive by polling (8–15 s), not push notifications.
 - No login rate limiting or lockout (scan, PIN issue and PIN guesses are limited).
 - Urdu read-aloud depends on the device having an Urdu voice; many desktop browsers do not.
-- Worker accounts are provisioned by staff; there is no self-service worker sign-up or password reset.
+- No password reset or account deletion flow; login is case-sensitive while usernames are unique
+  case-insensitively.
 - The Figma prototype was not available to the developer, so the visual design is original and
   only follows the brief's written guidance (mobile-first, Urdu RTL, large tap targets).
 - `runserver` needs PostgreSQL reachable at start-up; `/api/v1/health/` reports `503` if it later

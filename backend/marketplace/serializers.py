@@ -41,6 +41,7 @@ def worker_summary(profile, stats=None):
         "service_areas": _ids(profile.active_areas),
         "verified": True,
         "verification_simulated": profile.identity_simulated,
+        "verification_registry": "fictional",
         "rating": {"average": stats.get("rating_avg"), "count": stats.get("review_count", 0)},
         "completed_jobs": stats.get("completed_jobs", 0),
     }
@@ -155,8 +156,7 @@ class JobRequestSerializer(serializers.ModelSerializer):
         if rel == access.OWNER:
             if self.context.get("detail"):
                 quotes = list(job.quotes.all())
-                cards = public_workers({q.worker_id for q in quotes})
-                data["quotes"] = [quote_payload(q, cards.get(q.worker_id)) for q in quotes]
+                data["quotes"] = owner_quote_payloads(job, quotes)
             data["quote_count"] = getattr(job, "quote_count", None)
             if data["quote_count"] is None:
                 data["quote_count"] = job.quotes.count()
@@ -219,6 +219,21 @@ def quote_payload(quote, worker_card=None):
     if worker_card is not None:
         data["worker"] = worker_card
     return data
+
+
+def owner_quote_payloads(job, quotes):
+    """Quotes as the request owner sees them, with `worker_eligible`: whether accepting
+    would currently succeed for this worker (available and still covering the job)."""
+    from . import selectors
+
+    cards = public_workers({q.worker_id for q in quotes})
+    eligible = selectors.eligible_worker_ids(job, {q.worker_id for q in quotes}) if job.booking_or_none is None else set()
+    out = []
+    for q in quotes:
+        data = quote_payload(q, cards.get(q.worker_id))
+        data["worker_eligible"] = q.worker_id in eligible
+        out.append(data)
+    return out
 
 
 def booking_brief(booking):

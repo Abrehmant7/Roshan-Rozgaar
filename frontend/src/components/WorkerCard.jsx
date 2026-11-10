@@ -10,7 +10,7 @@ export default function WorkerCard({ worker, to, children }) {
       <div className="flex items-start justify-between gap-2">
         <div>
           <p className="text-lg font-bold">{worker.display_name}</p>
-          <VerifiedBadge simulated={worker.verification_simulated} />
+          <VerifiedBadge />
         </div>
         {worker.matches_specialty && (
           <span className="inline-flex items-center gap-1 rounded-full bg-sun-100 px-2 text-sm"><Sparkles className="size-4" aria-hidden />{t('matches_skill')}</span>

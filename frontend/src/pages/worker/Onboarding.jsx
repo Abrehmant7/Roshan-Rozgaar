@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { BadgeCheck, Camera, Check, FlaskConical, MapPin, Minus, Plus, RefreshCw } from 'lucide-react'
+import { BadgeCheck, Camera, Check, FlaskConical, Info, MapPin, Minus, Plus, RefreshCw, ScanLine } from 'lucide-react'
 import { Button, Card, Chip, ErrorBanner, FieldErrors, Heading, Spinner, Tile, TradeIcon } from '../../components/ui.jsx'
 import { api } from '../../lib/api.js'
 import { useCatalog, useSpecialties } from '../../lib/hooks.js'
@@ -23,7 +23,8 @@ function ScanStep({ onDone }) {
     const form = new FormData()
     form.append('image', file)
     try {
-      setResult(await api('/workers/me/scan/', { method: 'POST', form }))
+      // Live OCR can take several seconds; the server caps it at OCR_TIMEOUT_SECONDS.
+      setResult(await api('/workers/me/scan/', { method: 'POST', form, timeout: 45000 }))
     } catch (e) {
       setError(e)
     } finally {
@@ -46,15 +47,20 @@ function ScanStep({ onDone }) {
           <span className="text-xl font-bold">{t('scan_button')}</span>
         </button>
       )}
-      <ErrorBanner error={error} onRetry={error?.body?.retryable ? () => input.current?.click() : null} />
+      <ErrorBanner error={error} onRetry={error?.retryable ? () => input.current?.click() : null} />
       {result && (
         <Card className="space-y-3">
-          {result.simulated && (
+          {result.simulated ? (
             <div className="flex items-center gap-2 rounded-2xl bg-amber-100 p-3 text-amber-900" data-testid="mock-label">
               <FlaskConical className="size-6 shrink-0" aria-hidden />
               <div><p className="font-bold">{t('mock_badge')}</p><p className="text-sm">{t('mock_badge_note')}</p></div>
             </div>
+          ) : (
+            <p className="flex items-center gap-2 text-sm text-brand" data-testid="live-label"><ScanLine className="size-5" aria-hidden />{t('ocr_live')}</p>
           )}
+          <p className="flex items-start gap-2 rounded-2xl bg-sky-50 p-3 text-sm text-sky-900" data-testid="registry-label">
+            <Info className="mt-1 size-5 shrink-0" aria-hidden />{t('registry_fictional')}
+          </p>
           <p className="flex items-center gap-2 text-brand"><BadgeCheck className="size-6" aria-hidden />{t('scan_ok')}</p>
           <p className="text-lg">{t('is_this_you')}</p>
           <p className="text-2xl font-bold">{lang === 'ur' ? result.identity.name_ur : result.identity.name_en}</p>
@@ -70,8 +76,10 @@ function ScanStep({ onDone }) {
 export default function Onboarding() {
   const { t, name, lang } = useLang()
   const navigate = useNavigate()
-  const { trades, areas, error: catalogError } = useCatalog()
-  const [existing, setExisting] = useState(undefined)
+  const { trades, areas, error: catalogError, retry: retryCatalog } = useCatalog()
+  const [existing, setExisting] = useState(undefined) // undefined: loading, null: no profile yet
+  const [loadError, setLoadError] = useState(null)
+  const [attempt, setAttempt] = useState(0)
   const [scan, setScan] = useState(null)
   const [step, setStep] = useState(0)
   const [form, setForm] = useState({ display_name: '', experience_years: 1, trades: [], specialties: [], service_areas: [] })
@@ -80,13 +88,22 @@ export default function Onboarding() {
   const specialties = useSpecialties(form.trades)
 
   useEffect(() => {
+    let live = true
+    setLoadError(null)
     api('/workers/me/').then((p) => {
+      if (!live) return
       setExisting(p)
       setForm({ display_name: p.display_name, experience_years: p.experience_years, trades: p.trades,
         specialties: p.specialties, service_areas: p.service_areas })
       setStep(1)
-    }).catch(() => setExisting(null))
-  }, [])
+    }).catch((e) => {
+      if (!live) return
+      // Only "no profile yet" starts onboarding; any other failure is shown with a retry.
+      if (e.status === 404 && e.code === 'profile_not_found') setExisting(null)
+      else setLoadError(e)
+    })
+    return () => { live = false }
+  }, [attempt])
 
   // Drop specialties whose trade was unselected.
   useEffect(() => {
@@ -94,8 +111,16 @@ export default function Onboarding() {
     setForm((f) => ({ ...f, specialties: f.specialties.filter((id) => valid.has(id)) }))
   }, [specialties])
 
-  if (existing === undefined || (!trades && !catalogError)) return <Spinner />
-  if (catalogError) return <ErrorBanner error={catalogError} />
+  if (loadError) {
+    return (
+      <div className="space-y-3" data-testid="profile-load-error">
+        <Heading>{t('profile_load_failed')}</Heading>
+        <ErrorBanner error={loadError} onRetry={() => setAttempt((n) => n + 1)} />
+      </div>
+    )
+  }
+  if (catalogError) return <ErrorBanner error={catalogError} onRetry={retryCatalog} />
+  if (existing === undefined || !trades) return <Spinner />
 
   if (step === 0) {
     return <ScanStep onDone={(r) => {

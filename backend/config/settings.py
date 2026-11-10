@@ -136,20 +136,21 @@ REST_FRAMEWORK = {
 PRIVATE_MEDIA_ROOT = Path(env_str("PRIVATE_MEDIA_ROOT", str(BASE_DIR / "private_media")))
 
 # ID-card OCR for worker onboarding. "mock" uses built-in fictional fixtures;
-# "live" calls the configured provider from the server (the key never reaches React).
+# "live" calls PicToText from the server (the key never reaches the browser).
+# A missing key in live mode is reported by `manage.py check` (workers.W001) and
+# answered with 503 ocr_not_configured at scan time, so the rest of the app runs.
 OCR_MODE = env_str("OCR_MODE", "mock").strip().lower()
 if OCR_MODE not in {"mock", "live"}:
     raise ImproperlyConfigured("OCR_MODE must be 'mock' or 'live'.")
-OCR_ENDPOINT = env_str("OCR_ENDPOINT", "")
+OCR_ENDPOINT = env_str("OCR_ENDPOINT", "https://pictotext.io/api/v1/ocr")
 OCR_API_KEY = env_str("OCR_API_KEY", "")
-OCR_API_KEY_HEADER = env_str("OCR_API_KEY_HEADER", "X-API-Key")
-OCR_IMAGE_FIELD = env_str("OCR_IMAGE_FIELD", "image")
-OCR_TEXT_FIELD = env_str("OCR_TEXT_FIELD", "text")
-OCR_TIMEOUT_SECONDS = env_int("OCR_TIMEOUT_SECONDS", 10)
+OCR_DOCUMENT_TYPE = env_str("OCR_DOCUMENT_TYPE", "pk_id_card")
+OCR_TIMEOUT_SECONDS = env_int("OCR_TIMEOUT_SECONDS", 25)
 OCR_MAX_IMAGE_BYTES = env_int("OCR_MAX_IMAGE_BYTES", 5 * 1024 * 1024)
-if OCR_MODE == "live" and not OCR_ENDPOINT:
-    raise ImproperlyConfigured("OCR_MODE=live requires OCR_ENDPOINT.")
 SCAN_PROOF_TTL_SECONDS = env_int("SCAN_PROOF_TTL_SECONDS", 10 * 60)
+
+# Tests never reach the live OCR provider, whatever .env selects.
+TEST_RUNNER = "config.test_runner.OfflineOcrRunner"
 
 # Customer voice notes on job requests (stored under PRIVATE_MEDIA_ROOT).
 VOICE_NOTE_MAX_BYTES = env_int("VOICE_NOTE_MAX_BYTES", 5 * 1024 * 1024)

@@ -8,7 +8,7 @@ import { useLang } from '../../lib/i18n.jsx'
 
 export default function Find() {
   const { t } = useLang()
-  const { trades, areas, error: catalogError } = useCatalog()
+  const { trades, areas, error: catalogError, retry: retryCatalog } = useCatalog()
   const [params, setParams] = useSearchParams()
   const pick = pickerFromParams(params)
   const ready = Boolean(pick.trade && pick.area)
@@ -18,7 +18,7 @@ export default function Find() {
   const { data, error, loading } = useApi(query, { enabled: ready })
   const qs = new URLSearchParams(pickerToParams(pick)).toString()
 
-  if (catalogError) return <ErrorBanner error={catalogError} />
+  if (catalogError) return <ErrorBanner error={catalogError} onRetry={retryCatalog} />
   if (!trades) return <Spinner />
 
   return (

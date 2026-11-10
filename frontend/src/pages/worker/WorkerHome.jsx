@@ -23,7 +23,7 @@ export default function WorkerHome() {
   const [toggleError, setToggleError] = useState(null)
 
   if (loading && !data) return <Spinner />
-  if (error && !data) return <ErrorBanner error={error} onRetry={reload} />
+  if (error && !data) return <div data-testid="dashboard-error"><ErrorBanner error={error} onRetry={() => reload()} /></div>
 
   if (data.profile_status === 'missing') {
     return (
@@ -56,6 +56,12 @@ export default function WorkerHome() {
 
   return (
     <div className="space-y-4">
+      {error && (
+        <div data-testid="stale-banner" className="space-y-1">
+          <p className="text-sm text-amber-800">{t('stale_data')}</p>
+          <ErrorBanner error={error} onRetry={() => reload()} />
+        </div>
+      )}
       <Heading speak={`${t('hello')} ${data.display_name}. ${t(statusKey)}`}>{t('hello')}، {data.display_name}</Heading>
 
       <Card className={cx('space-y-3', data.is_available ? 'bg-brand-100' : busyOnJob ? 'bg-sun-100' : 'bg-gray-100')}>

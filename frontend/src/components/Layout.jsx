@@ -1,8 +1,9 @@
+import { useState } from 'react'
 import { NavLink, Outlet, useNavigate } from 'react-router-dom'
 import { ClipboardList, History, House, Languages, LogOut, Search, Briefcase } from 'lucide-react'
 import { useAuth } from '../lib/auth.jsx'
 import { useLang } from '../lib/i18n.jsx'
-import { cx } from './ui.jsx'
+import { ErrorBanner, cx } from './ui.jsx'
 
 export function LangToggle({ className }) {
   const { lang, setLang } = useLang()
@@ -31,6 +32,22 @@ export default function Layout({ role }) {
   const { t } = useLang()
   const { user, logout } = useAuth()
   const navigate = useNavigate()
+  const [leaving, setLeaving] = useState(false)
+  const [logoutError, setLogoutError] = useState(null)
+
+  async function signOut() {
+    setLeaving(true)
+    setLogoutError(null)
+    try {
+      await logout() // resolves only after Django answers 204
+      navigate('/', { replace: true, state: { notice: 'logged_out' } })
+    } catch (e) {
+      setLogoutError(e)
+    } finally {
+      setLeaving(false)
+    }
+  }
+
   return (
     <div className="min-h-dvh">
       <header className="sticky top-0 z-20 bg-brand text-white shadow">
@@ -43,8 +60,8 @@ export default function Layout({ role }) {
             <LangToggle />
             {user && (
               <button type="button" aria-label={t('logout')} title={t('logout')}
-                onClick={async () => { await logout(); navigate('/') }}
-                className="inline-flex min-h-11 items-center gap-1 rounded-full bg-white/15 px-3 text-sm">
+                onClick={signOut} disabled={leaving} aria-busy={leaving || undefined}
+                className="inline-flex min-h-11 items-center gap-1 rounded-full bg-white/15 px-3 text-sm disabled:opacity-60">
                 <LogOut className="size-5" aria-hidden /><span className="sr-only sm:not-sr-only">{t('logout')}</span>
               </button>
             )}
@@ -52,6 +69,7 @@ export default function Layout({ role }) {
         </div>
       </header>
       <main className="mx-auto max-w-md space-y-4 px-4 pt-4 pb-28">
+        {logoutError && <ErrorBanner error={logoutError} onRetry={signOut} />}
         <Outlet />
       </main>
       {TABS[role] && (

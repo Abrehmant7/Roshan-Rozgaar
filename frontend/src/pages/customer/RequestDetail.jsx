@@ -72,8 +72,11 @@ export default function RequestDetail() {
                 <span className="num text-2xl font-bold text-brand" data-testid="quote-amount">{money(q.amount)}</span>
                 {q.message && <span className="text-sm">{q.message}</span>}
               </div>
-              <Button variant="sun" icon={CircleCheck} busy={accepting === q.id} disabled={accepting !== null || !q.worker.is_available}
-                onClick={() => accept(q.id)}>{q.worker.is_available ? t('accept') : t('worker_busy')}</Button>
+              <Button variant="sun" icon={CircleCheck} busy={accepting === q.id}
+                disabled={accepting !== null || !q.worker.is_available || q.worker_eligible === false}
+                onClick={() => accept(q.id)}>
+                {q.worker_eligible === false ? t('quote_stale') : q.worker.is_available ? t('accept') : t('worker_busy')}
+              </Button>
             </WorkerCard>
           ))}
         </section>

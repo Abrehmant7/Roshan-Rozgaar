@@ -1,5 +1,5 @@
-import { Link } from 'react-router-dom'
-import { Hammer, Search } from 'lucide-react'
+import { Link, useLocation } from 'react-router-dom'
+import { CircleCheck, Hammer, Search } from 'lucide-react'
 import { Speak } from '../components/ui.jsx'
 import { useLang } from '../lib/i18n.jsx'
 
@@ -19,8 +19,14 @@ function RoleCard({ to, icon: Icon, title, sub, tone }) {
 
 export default function Landing() {
   const { t } = useLang()
+  const location = useLocation()
   return (
     <div className="space-y-5 pt-4">
+      {location.state?.notice === 'logged_out' && (
+        <p role="status" className="flex items-center gap-2 rounded-2xl bg-brand-100 p-3 text-brand" data-testid="logged-out">
+          <CircleCheck className="size-6" aria-hidden />{t('logged_out')}
+        </p>
+      )}
       <div className="space-y-1 text-center">
         <h1 className="text-3xl font-bold text-brand">{t('app_name')}</h1>
         <p className="text-brand/80">{t('tagline')}</p>

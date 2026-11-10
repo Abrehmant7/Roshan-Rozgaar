@@ -20,7 +20,13 @@ FAKE_REGISTRY = {
     "0000000000044": {"name_en": "Sajid Hussain", "name_ur": "ساجد حسین"},
     "0000000000055": {"name_en": "Imran Ali", "name_ur": "عمران علی"},
     "0000000000066": {"name_en": "Tariq Javed", "name_ur": "طارق جاوید"},
+    "0000000000077": {"name_en": "Faisal Mahmood", "name_ur": "فیصل محمود"},
+    "0000000000088": {"name_en": "Kamran Haider", "name_ur": "کامران حیدر"},
+    "0000000000099": {"name_en": "Asif Raza", "name_ur": "آصف رضا"},
 }
+
+# Every identity check in this app is against the list above.
+REGISTRY_KIND = "fictional"
 
 _CNIC_RE = re.compile(r"(?<!\d)(\d{5})[-\s]?(\d{7})[-\s]?(\d)(?!\d)")
 

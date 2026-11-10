@@ -61,6 +61,7 @@ def profile_payload(profile: WorkerProfile) -> dict:
             "id_masked": profile.id_masked,
             "verified_at": serializers.DateTimeField().to_representation(profile.verified_at),
             "simulated": profile.identity_simulated,
+            "registry": "fictional",
         },
         "created_at": serializers.DateTimeField().to_representation(profile.created_at),
         "updated_at": serializers.DateTimeField().to_representation(profile.updated_at),

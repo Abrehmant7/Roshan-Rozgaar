@@ -190,12 +190,13 @@ export function RatingLine({ rating, completed }) {
   )
 }
 
-export function VerifiedBadge({ simulated }) {
+/** ID matched against the fictional demo registry (never a real identity check). */
+export function VerifiedBadge() {
   const { t } = useLang()
   return (
-    <span className="inline-flex items-center gap-1 text-sm text-brand">
+    <span className="inline-flex items-center gap-1 text-sm text-brand" title={t('registry_fictional')}>
       <BadgeCheck className="size-4" aria-hidden />
-      {simulated ? t('verified_demo') : t('verified')}
+      {t('verified_demo')}
     </span>
   )
 }

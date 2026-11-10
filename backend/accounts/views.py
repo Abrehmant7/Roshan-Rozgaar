@@ -60,10 +60,8 @@ def csrf_token_view(request):
     return JsonResponse({"csrf_token": get_token(request)})
 
 
-@require_POST
-@csrf_protect
-@never_cache
-def register_view(request):
+def _register(request, role):
+    """Shared signup: only username + password are accepted; the role comes from the endpoint."""
     data = _json_body(request)
     if data is None:
         return _error("Request body must be a JSON object.", "invalid_json")
@@ -75,7 +73,7 @@ def register_view(request):
     if errors:
         return JsonResponse(errors, status=400)
 
-    form = RegistrationForm(data)
+    form = RegistrationForm(data, role=role)
     if not form.is_valid():
         return JsonResponse(_form_errors(form), status=400)
 
@@ -84,13 +82,34 @@ def register_view(request):
             user = User.objects.create_user(
                 username=form.cleaned_data["username"],
                 password=form.cleaned_data["password"],
-                role=User.Role.CUSTOMER,  # set by the server, never by the client
+                role=role,  # set by the server, never by the client
             )
-    except IntegrityError:  # lost a race with a concurrent registration
+    except IntegrityError:  # lost a race (incl. a case variant) with a concurrent signup
         return JsonResponse({"username": [DUPLICATE_USERNAME]}, status=400)
 
     login(request, user)
     return JsonResponse(UserSerializer(user).data, status=201)
+
+
+@require_POST
+@csrf_protect
+@never_cache
+def register_view(request):
+    """POST /api/v1/auth/register/ — customer signup."""
+    return _register(request, User.Role.CUSTOMER)
+
+
+@require_POST
+@csrf_protect
+@never_cache
+def register_worker_view(request):
+    """POST /api/v1/auth/register/worker/ — worker signup.
+
+    Creates a worker *account* only. The worker must still complete the ID scan
+    and profile before they appear in discovery or can quote. Staff/superuser
+    flags are never set here; they stay under Django Admin.
+    """
+    return _register(request, User.Role.WORKER)
 
 
 @require_POST

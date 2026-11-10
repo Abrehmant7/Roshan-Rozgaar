@@ -1,10 +1,12 @@
 """Worker onboarding: ID scan -> one-time proof -> profile.
 
-Account authentication is separate: workers sign in with staff-provisioned
-accounts (Phase 2). The scan only verifies identity for the profile.
+Account authentication is separate: workers sign up themselves
+(POST /api/v1/auth/register/worker/) or use staff-provisioned accounts. The scan
+only verifies identity for the profile, always against the FICTIONAL registry.
 """
 
 import hashlib
+import logging
 import secrets
 from datetime import timedelta
 
@@ -22,7 +24,9 @@ from config.api import ApiError, IsWorker, conflict
 
 from . import identity
 from .models import ScanProof, WorkerProfile
-from .ocr import OcrError, detect_image_type, read_card
+from .ocr import MOCK_AUTO_ORDER, MOCK_CARDS, OcrFailure, detect_image_type, read_card
+
+logger = logging.getLogger(__name__)
 from .serializers import WorkerProfileWriteSerializer, profile_payload
 
 
@@ -39,6 +43,16 @@ def _get_profile(user):
             "profile_not_found",
             status.HTTP_404_NOT_FOUND,
         ) from None
+
+
+def _first_free_mock_card(user):
+    """Mock mode without a fixture keyword: the first fictional card not linked to
+    another worker (keeps the demo flow working for newly signed-up workers)."""
+    taken = set(WorkerProfile.objects.exclude(user=user).values_list("identity_digest", flat=True))
+    for key in MOCK_AUTO_ORDER:
+        if identity.identity_digest(MOCK_CARDS[key]) not in taken:
+            return MOCK_CARDS[key]
+    return MOCK_CARDS[MOCK_AUTO_ORDER[0]]  # all taken -> 409 identity_in_use below
 
 
 def _field_error(field, message, code):
@@ -67,17 +81,15 @@ class ScanView(APIView):
         data = upload.read()
         try:
             result = read_card(data, kind, upload.name)
-        except OcrError:
-            raise ApiError(
-                "Could not read the card right now. Please try again.",
-                "ocr_unavailable",
-                status.HTTP_503_SERVICE_UNAVAILABLE,
-                retryable=True,
-            ) from None
+        except OcrFailure as failure:
+            # Only the stable code is logged: never the image, the ID or the API key.
+            logger.warning("ID scan failed: %s (mode=%s)", failure.code, settings.OCR_MODE)
+            raise ApiError(failure.message, failure.code, failure.status,
+                           retryable=failure.retryable, mode=settings.OCR_MODE) from None
         finally:
             del data  # the image is never stored
 
-        digits = identity.extract_cnic(result.text)
+        digits = _first_free_mock_card(request.user) if result.auto else result.id_number
         if digits is None:
             raise ApiError(
                 "No ID number found. Retake the photo in good light with the whole card visible.",
@@ -89,7 +101,7 @@ class ScanView(APIView):
         record = identity.lookup(digits)
         if record is None:
             raise ApiError(
-                "This ID number is not in the registry.",
+                "This ID number is not in the fictional demo registry.",
                 "id_not_registered",
                 status.HTTP_422_UNPROCESSABLE_ENTITY,
                 retryable=True,
@@ -113,7 +125,8 @@ class ScanView(APIView):
         return Response(
             {
                 "mode": result.mode,
-                "simulated": result.simulated,
+                "simulated": result.simulated,  # True when the OCR itself was the mock
+                "registry": identity.REGISTRY_KIND,  # always "fictional": not a real identity check
                 "identity": {
                     "name_en": record["name_en"],
                     "name_ur": record["name_ur"],

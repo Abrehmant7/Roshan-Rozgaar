@@ -188,7 +188,7 @@ export default function BookingPage() {
         {isCustomer ? (
           <div className="flex items-center justify-between">
             <span>{t('worker')}: <b>{b.worker.display_name}</b></span>
-            <span className="flex flex-col items-end"><VerifiedBadge simulated={b.worker.verification_simulated} /><RatingLine rating={b.worker.rating} /></span>
+            <span className="flex flex-col items-end"><VerifiedBadge /><RatingLine rating={b.worker.rating} /></span>
           </div>
         ) : (
           <p>{t('customer')}: <b>{b.customer.username}</b></p>

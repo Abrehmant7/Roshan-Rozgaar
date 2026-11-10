@@ -98,6 +98,18 @@ class ScanTests(OnboardingBase):
                 self.assertTrue(response.json()["retryable"])
         self.assertFalse(ScanProof.objects.exists())
 
+    def test_registry_is_labelled_fictional(self):
+        self.assertEqual(self.scan().json()["registry"], "fictional")
+
+    def test_mock_without_keyword_picks_first_free_fictional_card(self):
+        self.assertEqual(self.scan(name="photo.png").json()["identity"]["name_en"], "Imran Ali")  # card-5
+        taken = make_user("taken_worker", role="worker")
+        WorkerProfile.objects.create(
+            user=taken, display_name="Taken", experience_years=1, verified_name="Imran Ali",
+            id_masked="x", identity_digest=identity.identity_digest("0000000000055"), verified_at=timezone.now())
+        self.assertEqual(self.scan(name="IMG_2041.jpg", content=b"\xff\xd8\xff" + b"\x00" * 20,
+                                   ctype="image/jpeg").json()["identity"]["name_en"], "Tariq Javed")  # card-6
+
     def test_identity_already_linked_to_another_worker(self):
         proof = self.scan().json()["scan_proof"]
         self.assertEqual(self.api.put(ME, self.profile_body(proof)).status_code, 201)
@@ -107,38 +119,106 @@ class ScanTests(OnboardingBase):
         self.assertEqual(response.json()["code"], "identity_in_use")
 
 
-@override_settings(OCR_MODE="live", OCR_ENDPOINT="https://ocr.invalid/v1/read", OCR_API_KEY="test-key",
-                   OCR_TEXT_FIELD="result.text")
-class LiveAdapterTests(OnboardingBase):
-    def test_live_success_sends_key_server_side(self):
-        payload = json.dumps({"result": {"text": "NAME\nIDENTITY NUMBER 00000-0000003-3"}}).encode()
-        fake = mock.MagicMock()
-        fake.__enter__.return_value.read.return_value = payload
-        with mock.patch("workers.ocr.request.urlopen", return_value=fake) as urlopen:
+FAKE_KEY = "sk-test-not-a-real-key"
+LIVE = dict(OCR_MODE="live", OCR_ENDPOINT="https://pictotext.invalid/api/v1/ocr", OCR_API_KEY=FAKE_KEY,
+            OCR_DOCUMENT_TYPE="pk_id_card", OCR_TIMEOUT_SECONDS=7)
+
+
+def provider_ok(payload):
+    fake = mock.MagicMock()
+    fake.__enter__.return_value.read.return_value = json.dumps(payload).encode()
+    return fake
+
+
+def provider_error(status, reason=None):
+    body = {"error": {"code": status, "message": "provider message", "status": "ERR",
+                      "details": [{"reason": reason}] if reason else []}}
+    return error.HTTPError(LIVE["OCR_ENDPOINT"], status, "error", {}, BytesIO(json.dumps(body).encode()))
+
+
+@override_settings(**LIVE)
+class PicToTextAdapterTests(OnboardingBase):
+    """The live adapter against PicToText's documented contract (network faked)."""
+
+    def test_request_contract_and_id_number(self):
+        payload = {"idNumber": "00000-0000003-3", "name": "RASHID MEHMOOD", "country": "PAKISTAN"}
+        with mock.patch("workers.ocr.request.urlopen", return_value=provider_ok(payload)) as urlopen:
             response = self.scan()
-        self.assertEqual(response.status_code, 201)
-        self.assertEqual(response.json()["mode"], "live")
-        self.assertFalse(response.json()["simulated"])
-        self.assertEqual(response.json()["identity"]["name_en"], "Rashid Mehmood")
+        self.assertEqual(response.status_code, 201, response.content)
+        body = response.json()
+        self.assertEqual((body["mode"], body["simulated"], body["registry"]), ("live", False, "fictional"))
+        self.assertEqual(body["identity"]["name_en"], "Rashid Mehmood")
         sent = urlopen.call_args.args[0]
-        self.assertEqual(sent.get_header("X-api-key"), "test-key")
-        self.assertEqual(urlopen.call_args.kwargs["timeout"], 10)
-        self.assertNotIn("test-key", response.content.decode())
+        self.assertEqual((sent.full_url, sent.get_method()), (LIVE["OCR_ENDPOINT"], "POST"))
+        self.assertEqual(sent.get_header("Authorization"), f"Bearer {FAKE_KEY}")
+        self.assertIn(b'name="documentType"\r\n\r\npk_id_card\r\n', sent.data)
+        self.assertIn(b'name="image"; filename="card.png"\r\nContent-Type: image/png', sent.data)
+        self.assertIn(PNG, sent.data)
+        self.assertEqual(urlopen.call_args.kwargs["timeout"], 7)
+        self.assertNotIn(FAKE_KEY, response.content.decode())
 
-    def test_live_provider_failure_is_retryable_503(self):
-        for exc in (error.URLError("down"), TimeoutError()):
-            with self.subTest(exc=type(exc).__name__), mock.patch("workers.ocr.request.urlopen", side_effect=exc):
+    def test_id_number_normalization(self):
+        cases = {
+            "00000 0000003 3": (201, None), "0000000000033": (201, None),
+            "12345": (422, "id_not_found"), "": (422, "id_not_found"),
+            "00000-0000099-9": (422, "id_not_registered"),
+        }
+        for raw, (status, code) in cases.items():
+            with self.subTest(raw=raw), mock.patch("workers.ocr.request.urlopen",
+                                                   return_value=provider_ok({"idNumber": raw})):
                 response = self.scan()
-                self.assertEqual(response.status_code, 503)
-                self.assertEqual(response.json(), {
-                    "detail": "Could not read the card right now. Please try again.",
-                    "code": "ocr_unavailable", "retryable": True})
+                self.assertEqual(response.status_code, status)
+                if code:
+                    self.assertEqual(response.json()["code"], code)
+        with mock.patch("workers.ocr.request.urlopen", return_value=provider_ok({"name": "NO NUMBER"})):
+            self.assertEqual(self.scan().json()["code"], "id_not_found")
 
-    def test_live_unexpected_shape_is_503(self):
+    def test_provider_errors_map_to_clear_codes(self):
+        import socket
+
+        cases = [
+            (provider_error(401, "INVALID_API_KEY"), 503, "ocr_auth_rejected", False),
+            (provider_error(403, "EMAIL_NOT_VERIFIED"), 503, "ocr_auth_rejected", False),
+            (provider_error(402, "INSUFFICIENT_CREDITS"), 503, "ocr_quota_exceeded", False),
+            (provider_error(429), 503, "ocr_quota_exceeded", True),
+            (provider_error(400, "INVALID_IMAGE_TYPE"), 422, "image_rejected", True),
+            (provider_error(400, "IMAGE_TOO_LARGE"), 422, "image_rejected", True),
+            (provider_error(400, "INVALID_DOCUMENT_TYPE"), 503, "ocr_not_configured", False),
+            (provider_error(500, "AI_SERVICE_ERROR"), 503, "ocr_unavailable", True),
+            (TimeoutError(), 504, "ocr_timeout", True),
+            (error.URLError(socket.timeout("timed out")), 504, "ocr_timeout", True),
+            (error.URLError("name resolution failed"), 503, "ocr_unavailable", True),
+        ]
+        for exc, status, code, retryable in cases:
+            with self.subTest(code=code, exc=repr(exc)[:40]),                     mock.patch("workers.ocr.request.urlopen", side_effect=exc),                     self.assertLogs("workers.views", "WARNING") as logs:
+                response = self.scan()
+                self.assertEqual(response.status_code, status)
+                body = response.json()
+                self.assertEqual((body["code"], body["retryable"]), (code, retryable))
+                self.assertNotIn(FAKE_KEY, response.content.decode())
+                self.assertNotIn(FAKE_KEY, " ".join(logs.output))
+                self.assertIn(code, " ".join(logs.output))
+        self.assertFalse(ScanProof.objects.exists())
+
+    def test_non_json_answer_is_unavailable(self):
         fake = mock.MagicMock()
-        fake.__enter__.return_value.read.return_value = b'{"other": 1}'
+        fake.__enter__.return_value.read.return_value = b"<html>gateway</html>"
         with mock.patch("workers.ocr.request.urlopen", return_value=fake):
-            self.assertEqual(self.scan().status_code, 503)
+            self.assertEqual(self.scan().json()["code"], "ocr_unavailable")
+
+    @override_settings(OCR_API_KEY="")
+    def test_missing_key_is_reported_without_calling_the_provider(self):
+        with mock.patch("workers.ocr.request.urlopen") as urlopen:
+            response = self.scan()
+        self.assertEqual(response.status_code, 503)
+        self.assertEqual((response.json()["code"], response.json()["retryable"]), ("ocr_not_configured", False))
+        urlopen.assert_not_called()
+
+    def test_mock_mode_stays_selectable(self):
+        with self.settings(OCR_MODE="mock"), mock.patch("workers.ocr.request.urlopen") as urlopen:
+            body = self.scan().json()
+        self.assertEqual((body["mode"], body["simulated"]), ("mock", True))
+        urlopen.assert_not_called()
 
 
 class ProfileTests(OnboardingBase):

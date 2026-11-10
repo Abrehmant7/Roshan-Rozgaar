@@ -12,7 +12,7 @@ export default function NewRequest() {
   const { t } = useLang()
   const navigate = useNavigate()
   const [params] = useSearchParams()
-  const { trades, areas, error: catalogError } = useCatalog()
+  const { trades, areas, error: catalogError, retry: retryCatalog } = useCatalog()
   const [pick, setPick] = useState(() => pickerFromParams(params))
   const [description, setDescription] = useState('')
   const [address, setAddress] = useState('')
@@ -20,7 +20,7 @@ export default function NewRequest() {
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState(null)
 
-  if (catalogError) return <ErrorBanner error={catalogError} />
+  if (catalogError) return <ErrorBanner error={catalogError} onRetry={retryCatalog} />
   if (!trades) return <Spinner />
 
   const hasContent = description.trim() || voice

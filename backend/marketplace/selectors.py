@@ -34,6 +34,22 @@ def worker_stats(user_ids):
     return stats
 
 
+def covering(job):
+    """Q-filter for worker profiles that still offer this job's trade in its service area
+    (both catalog entries active). Used for quote acceptance and quote display."""
+    through = WorkerProfile
+    return Exists(through.trades.through.objects.filter(
+        workerprofile_id=OuterRef("pk"), trade_id=job.trade_id, trade__is_active=True)) & Exists(
+        through.service_areas.through.objects.filter(
+            workerprofile_id=OuterRef("pk"), servicearea_id=job.service_area_id, servicearea__is_active=True))
+
+
+def eligible_worker_ids(job, user_ids):
+    """Workers who could be booked for `job` right now: available AND still covering it."""
+    return set(WorkerProfile.objects.available().filter(covering(job), user_id__in=list(user_ids))
+               .values_list("pk", flat=True))
+
+
 def _rating_subquery():
     from .models import Review
 
