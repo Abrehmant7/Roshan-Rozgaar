@@ -23,7 +23,7 @@ class SeedCommandTests(TestCase):
     def test_seed_is_idempotent(self):
         seed()
         first = counts()
-        self.assertEqual(first, (4, 14, 3))
+        self.assertEqual(first, (4, 14, 6))
         seed()
         self.assertEqual(counts(), first)
         self.assertEqual(
@@ -32,7 +32,7 @@ class SeedCommandTests(TestCase):
         )
         self.assertEqual(
             set(ServiceArea.objects.values_list("city", "sector_code")),
-            {("Islamabad", "G-11"), ("Islamabad", "G-13"), ("Islamabad", "I-10")},
+            {("Islamabad", c) for c in ("G-11", "G-13", "I-10", "F-10", "G-9", "I-8")},
         )
 
     def test_seed_preserves_admin_edits(self):
@@ -45,7 +45,7 @@ class SeedCommandTests(TestCase):
         self.assertEqual(Trade.objects.get(slug="plumbing").sort_order, 99)
         self.assertFalse(Specialty.objects.get(slug="gas-refill").is_active)
         self.assertEqual(ServiceArea.objects.get(sector_code="G-13").name_ur, "جی تیرہ")
-        self.assertEqual(counts(), (4, 14, 3))
+        self.assertEqual(counts(), (4, 14, 6))
 
 
 class ModelRuleTests(TestCase):
@@ -93,7 +93,7 @@ class CatalogApiTests(TestCase):
         self.assertEqual([t["slug"] for t in trades], ["plumbing", "electrical", "ac-repair", "carpentry"])
         self.assertEqual(set(trades[0]), {"id", "slug", "name_en", "name_ur", "icon_key"})
         areas = self.get("/api/v1/catalog/service-areas/")
-        self.assertEqual([a["sector_code"] for a in areas], ["G-11", "G-13", "I-10"])
+        self.assertEqual([a["sector_code"] for a in areas], ["G-11", "G-13", "I-10", "F-10", "G-9", "I-8"])
         self.assertEqual(set(areas[0]), {"id", "city", "sector_code", "name_en", "name_ur"})
 
     def test_specialties_are_filtered_by_trade(self):

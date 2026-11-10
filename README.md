@@ -4,10 +4,10 @@ A mobile-first, hyper-local marketplace connecting households in Islamabad with 
 trade workers. Customers post jobs and receive quotes, accept one, the worker checks in with a
 one-time arrival PIN, and the customer reviews the completed job.
 
-> **Status — phase 2 (accounts + catalog).** Django + DRF on PostgreSQL with session
-> authentication for customers and workers, and a database-driven catalog of trades,
-> specialties and service areas. Worker self-onboarding, jobs, the React/Tailwind client and AI
-> services arrive in later phases.
+> **Status — phase 7 (backend complete).** Accounts, catalog, OCR-assisted worker onboarding,
+> discovery, job requests with voice notes, quotes, bookings with arrival PIN, reviews, reports and
+> the worker dashboard work end to end through the API. Contract: [docs/API.md](docs/API.md);
+> captured samples: [docs/api-samples.md](docs/api-samples.md). The React client is next.
 
 ## Tech stack
 
@@ -49,10 +49,9 @@ python -m pip install -r backend\requirements.txt
 # 3. PostgreSQL (Docker Desktop must be running)
 docker compose up -d --wait db
 
-# 4. Schema, starter catalog and an Admin account
+# 4. Schema and fictional demo data (catalog, demo accounts, sample jobs)
 python backend\manage.py migrate
-python backend\manage.py seed_catalog
-python backend\manage.py createsuperuser
+python backend\manage.py seed_demo
 
 # 5. Run Django
 python backend\manage.py runserver
@@ -68,8 +67,30 @@ Run the test suite (it creates a temporary `test_<DB_NAME>` database, so the DB 
 `CREATEDB`; the Compose user has it):
 
 ```powershell
-python backend\manage.py test accounts catalog
+python backend\manage.py test accounts catalog workers marketplace
 ```
+
+(Pass the app labels: run from the repo root, plain `manage.py test` discovers nothing.)
+
+### Demo accounts (local, demo-only)
+
+`seed_demo` creates fictional accounts that all use the password `RozgarDemo#2026`
+(override with `--password` or `DEMO_PASSWORD`). It refuses to run with `DJANGO_DEBUG` off.
+
+| Username | Role | State |
+| --- | --- | --- |
+| `demo_ayesha` | customer | no history — use for the live walkthrough |
+| `demo_bilal` | customer | past completed jobs with reviews; one open carpentry request in G-13 |
+| `demo_imran` | worker | **fresh** — onboard with the ID scan (mock returns "Imran Ali") |
+| `demo_tariq` | worker | fresh spare — name the photo `card-6.jpg` for "Tariq Javed" |
+| `demo_akram` | worker | ready: Electrical (wiring, fans), G-11/G-13, rated 4.5 from 2 jobs |
+| `demo_naveed` | worker | ready: AC repair + Electrical, G-11/I-10 |
+| `demo_rashid` | worker | ready: Plumbing, G-11/G-13/I-10 |
+| `demo_sajid` | worker | ready: Carpentry, G-13/F-10 |
+| `demo_staff` | staff | Django Admin: catalog, report queue |
+
+Re-run onboarding later with `python backend\manage.py seed_demo --reset-onboarding`
+(removes only the profiles of `demo_imran` and `demo_tariq`). Nothing else is ever overwritten.
 
 ### Provision a test worker (until worker onboarding exists)
 

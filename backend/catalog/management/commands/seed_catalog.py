@@ -42,6 +42,9 @@ SERVICE_AREAS = [
     ("Islamabad", "G-11", "G-11", "جی-11"),
     ("Islamabad", "G-13", "G-13", "جی-13"),
     ("Islamabad", "I-10", "I-10", "آئی-10"),
+    ("Islamabad", "F-10", "F-10", "ایف-10"),
+    ("Islamabad", "G-9", "G-9", "جی-9"),
+    ("Islamabad", "I-8", "I-8", "آئی-8"),
 ]
 
 
