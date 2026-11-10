@@ -9,4 +9,5 @@ urlpatterns = [
     path("auth/", include("accounts.urls")),
     path("catalog/", include("catalog.urls")),
     path("", include("workers.urls")),
+    path("", include("marketplace.urls")),
 ]

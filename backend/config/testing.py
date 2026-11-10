@@ -58,6 +58,29 @@ def make_user(username, role="customer", **extra):
     return User.objects.create_user(username, password=PASSWORD, role=role, **extra)
 
 
+def make_worker(username, trades, areas, specialties=(), accepting=True, name=None, years=5):
+    """A worker with a complete profile, bypassing the scan (tests only)."""
+    import uuid
+
+    from django.utils import timezone
+
+    from workers.models import WorkerProfile
+
+    user = make_user(username, role="worker")
+    profile = WorkerProfile.objects.create(
+        user=user, display_name=name or username.replace("_", " ").title(), experience_years=years,
+        accepting_jobs=accepting, verified_name="Test Person", id_masked="*****-****000-0",
+        identity_digest=uuid.uuid4().hex, identity_simulated=True, verified_at=timezone.now(),
+    )
+    profile.trades.set(trades)
+    profile.service_areas.set(areas)
+    profile.specialties.set(specialties)
+    return user
+
+
+WEBM = b"\x1a\x45\xdf\xa3" + b"\x00" * 64  # Matroska/WebM magic + padding
+
+
 def upload(name, content, content_type):
     from django.core.files.uploadedfile import SimpleUploadedFile
 

@@ -45,6 +45,7 @@ INSTALLED_APPS = [
     "accounts",
     "catalog",
     "workers",
+    "marketplace",
 ]
 
 MIDDLEWARE = [
@@ -146,3 +147,6 @@ OCR_MAX_IMAGE_BYTES = env_int("OCR_MAX_IMAGE_BYTES", 5 * 1024 * 1024)
 if OCR_MODE == "live" and not OCR_ENDPOINT:
     raise ImproperlyConfigured("OCR_MODE=live requires OCR_ENDPOINT.")
 SCAN_PROOF_TTL_SECONDS = env_int("SCAN_PROOF_TTL_SECONDS", 10 * 60)
+
+# Customer voice notes on job requests (stored under PRIVATE_MEDIA_ROOT).
+VOICE_NOTE_MAX_BYTES = env_int("VOICE_NOTE_MAX_BYTES", 5 * 1024 * 1024)
