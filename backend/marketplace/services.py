@@ -20,7 +20,7 @@ from config.api import ApiError, conflict
 from workers.models import WorkerProfile
 
 from . import access
-from .models import ArrivalPin, Booking, BookingStatus, JobRequest, Quote
+from .models import ArrivalPin, Booking, BookingStatus, JobRequest, Quote, Report, Review
 
 
 def _not_found():
@@ -178,3 +178,36 @@ def complete(worker, booking_id):
         booking.completed_at = timezone.now()
         booking.save(update_fields=["status", "completed_at", "updated_at"])
     return booking
+
+
+# ------------------------------------------------------ reviews / reports ---
+
+def create_review(customer, booking_id, rating, text="", tags=()):
+    with transaction.atomic():
+        booking = _locked_booking(booking_id, customer=customer)
+        if booking.status != BookingStatus.COMPLETED:
+            raise conflict("You can review only after the job is completed.", "booking_not_completed")
+        if Review.objects.filter(booking=booking).exists():
+            raise conflict("You already reviewed this job.", "review_exists")
+        try:
+            with transaction.atomic():
+                return Review.objects.create(
+                    booking=booking, customer_id=booking.customer_id, worker_id=booking.worker_id,
+                    rating=rating, text=text, tags=list(tags),
+                )
+        except IntegrityError:
+            raise conflict("You already reviewed this job.", "review_exists") from None
+
+
+def create_report(user, booking_id, reason, details=""):
+    booking = Booking.objects.filter(pk=booking_id).first()
+    if booking is None or user.id not in (booking.customer_id, booking.worker_id):
+        raise _not_found()
+    subject_id = booking.worker_id if user.id == booking.customer_id else booking.customer_id
+    try:
+        with transaction.atomic():
+            return Report.objects.create(
+                booking=booking, reporter=user, subject_id=subject_id, reason=reason, details=details
+            )
+    except IntegrityError:
+        raise conflict("You already reported this booking. Staff will review it.", "report_exists") from None

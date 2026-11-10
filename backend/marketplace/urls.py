@@ -16,4 +16,11 @@ urlpatterns = [
     path("bookings/<int:pk>/pin/", views.IssuePinView.as_view(), name="booking-pin"),
     path("bookings/<int:pk>/check-in/", views.CheckInView.as_view(), name="booking-check-in"),
     path("bookings/<int:pk>/complete/", views.CompleteView.as_view(), name="booking-complete"),
+    path("bookings/<int:pk>/review/", views.ReviewCreateView.as_view(), name="booking-review"),
+    path("bookings/<int:pk>/reports/", views.ReportCreateView.as_view(), name="booking-reports"),
+    path("reports/", views.MyReportsView.as_view(), name="my-reports"),
+    path("reports/reasons/", views.ReportReasonsView.as_view(), name="report-reasons"),
+    path("reviews/tags/", views.ReviewTagsView.as_view(), name="review-tags"),
+    path("workers/me/dashboard/", views.WorkerDashboardView.as_view(), name="worker-dashboard"),
+    path("workers/<int:pk>/", views.WorkerPublicView.as_view(), name="worker-public"),
 ]

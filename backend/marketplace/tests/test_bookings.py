@@ -87,7 +87,7 @@ class AcceptTests(BookingFlowBase):
         self.assertEqual(response.status_code, 201, response.content)
         booking = response.json()
         self.assertEqual((booking["status"], booking["amount"], booking["viewer"]), ("BOOKED", "1500.00", "customer"))
-        self.assertEqual(booking["actions"], ["issue_pin"])
+        self.assertEqual(booking["actions"], ["issue_pin", "report"])
         self.assertEqual(booking["worker"]["display_name"], "Akram")
         self.assertFalse(booking["worker"]["is_available"])
 
@@ -162,7 +162,7 @@ class PinAndCompletionTests(BookingFlowBase):
         self.assertNotIn(pin, record.digest)
 
         worker_view = self.akram_api.get(self.url).json()
-        self.assertEqual(worker_view["actions"], ["check_in"])
+        self.assertEqual(worker_view["actions"], ["check_in", "report"])
         self.assertIsNotNone(worker_view["active_pin"])
         self.assertNotIn(pin, str(worker_view))
         self.assertNotIn(pin, str(self.owner.get(self.url).json()))
@@ -170,7 +170,7 @@ class PinAndCompletionTests(BookingFlowBase):
         self.assertEqual(self.akram_api.post(f"{self.url}complete/").json()["code"], "check_in_required")
         done = self.check_in(pin)
         self.assertEqual(done.status_code, 200, done.content)
-        self.assertEqual((done.json()["status"], done.json()["actions"]), ("IN_PROGRESS", ["complete"]))
+        self.assertEqual((done.json()["status"], done.json()["actions"]), ("IN_PROGRESS", ["complete", "report"]))
         replay = self.check_in(pin)
         self.assertEqual((replay.status_code, replay.json()["code"]), (409, "invalid_booking_status"))
         self.assertEqual(self.issue().json()["code"], "invalid_booking_status")

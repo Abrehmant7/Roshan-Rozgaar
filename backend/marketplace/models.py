@@ -131,3 +131,87 @@ class ArrivalPin(models.Model):
                 name="one_live_pin_per_booking",
             )
         ]
+
+
+# (key, English, Urdu) — stable keys; labels are display copy only.
+REVIEW_TAGS = [
+    ("on_time", "On time", "وقت پر آئے"),
+    ("fair_price", "Fair price", "مناسب قیمت"),
+    ("quality_work", "Quality work", "عمدہ کام"),
+    ("clean_work", "Clean work", "صاف ستھرا کام"),
+    ("polite", "Polite", "خوش اخلاق"),
+    ("would_hire_again", "Would hire again", "دوبارہ بلائیں گے"),
+]
+REVIEW_TAG_KEYS = {key for key, _, _ in REVIEW_TAGS}
+
+
+class Review(models.Model):
+    booking = models.OneToOneField(Booking, on_delete=models.PROTECT, related_name="review")
+    customer = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.PROTECT, related_name="reviews_given")
+    worker = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.PROTECT, related_name="reviews_received")
+    rating = models.PositiveSmallIntegerField()
+    text = models.TextField(max_length=500, blank=True)
+    tags = models.JSONField(default=list, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["-created_at", "-id"]
+        constraints = [
+            models.CheckConstraint(condition=Q(rating__gte=1, rating__lte=5), name="review_rating_1_to_5"),
+        ]
+
+    def __str__(self):
+        return f"{self.rating}/5 for booking #{self.booking_id}"
+
+
+class ReportReason(models.TextChoices):
+    NO_SHOW = "no_show", "Did not show up"
+    UNSAFE = "unsafe", "Unsafe behaviour"
+    HARASSMENT = "harassment", "Harassment or abuse"
+    FRAUD = "fraud", "Fraud or overcharging"
+    POOR_WORK = "poor_work", "Poor or damaging work"
+    PAYMENT = "payment_dispute", "Payment dispute"
+    OTHER = "other", "Other"
+
+
+REPORT_REASON_UR = {
+    "no_show": "نہیں آئے",
+    "unsafe": "غیر محفوظ رویہ",
+    "harassment": "بدتمیزی یا ہراسانی",
+    "fraud": "دھوکہ یا زیادہ پیسے",
+    "poor_work": "خراب یا نقصان دہ کام",
+    "payment_dispute": "ادائیگی کا جھگڑا",
+    "other": "کچھ اور",
+}
+
+
+class ReportStatus(models.TextChoices):
+    OPEN = "OPEN", "Open"
+    RESOLVED = "RESOLVED", "Resolved"
+    DISMISSED = "DISMISSED", "Dismissed"
+
+
+class Report(models.Model):
+    """Private report by one booking participant about the other. Staff-only beyond the reporter."""
+
+    booking = models.ForeignKey(Booking, on_delete=models.PROTECT, related_name="reports")
+    reporter = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.PROTECT, related_name="reports_filed")
+    subject = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.PROTECT, related_name="reports_received")
+    reason = models.CharField(max_length=32, choices=ReportReason.choices)
+    details = models.TextField(max_length=1000, blank=True)
+    status = models.CharField(max_length=16, choices=ReportStatus.choices, default=ReportStatus.OPEN)
+    created_at = models.DateTimeField(auto_now_add=True)
+    resolution_note = models.TextField(blank=True)
+    resolved_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, blank=True, related_name="+"
+    )
+    resolved_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        ordering = ["-created_at", "-id"]
+        constraints = [
+            models.UniqueConstraint(fields=["booking", "reporter"], name="one_report_per_participant_per_booking"),
+        ]
+
+    def __str__(self):
+        return f"Report #{self.pk} ({self.get_reason_display()}, {self.status})"

@@ -10,7 +10,7 @@ from catalog.models import ServiceArea, Specialty, Trade
 
 from . import access
 from .media import AUDIO_TYPES, detect_audio_type
-from .models import JobRequest
+from .models import REPORT_REASON_UR, REVIEW_TAG_KEYS, REVIEW_TAGS, JobRequest, ReportReason
 
 
 class SpecialtyBriefSerializer(serializers.ModelSerializer):
@@ -237,19 +237,73 @@ class CheckInSerializer(serializers.Serializer):
     pin = serializers.RegexField(r"^\d{6}$", error_messages={"invalid": "Enter the 6-digit PIN."})
 
 
-def booking_actions(booking, viewer_role):
+def booking_actions(booking, viewer_role, has_review, has_my_report):
     """What the viewer may do right now. React renders controls from this list only."""
     from .models import BookingStatus
 
     actions = []
-    if viewer_role == "customer" and booking.status == BookingStatus.BOOKED:
-        actions.append("issue_pin")
-    if viewer_role == "worker":
+    if viewer_role == "customer":
+        if booking.status == BookingStatus.BOOKED:
+            actions.append("issue_pin")
+        if booking.status == BookingStatus.COMPLETED and not has_review:
+            actions.append("review")
+    else:
         if booking.status == BookingStatus.BOOKED:
             actions.append("check_in")
         elif booking.status == BookingStatus.IN_PROGRESS:
             actions.append("complete")
+    if not has_my_report:
+        actions.append("report")
     return actions
+
+
+def review_payload(review, include_booking=False):
+    data = {
+        "id": review.pk,
+        "rating": review.rating,
+        "text": review.text,
+        "tags": review.tags,
+        "created_at": iso(review.created_at),
+    }
+    if include_booking:
+        data["booking"] = review.booking_id
+    return data
+
+
+def report_payload(report):
+    return {
+        "id": report.pk,
+        "booking": report.booking_id,
+        "reason": report.reason,
+        "details": report.details,
+        "status": report.status,
+        "created_at": iso(report.created_at),
+    }
+
+
+class ReviewCreateSerializer(serializers.Serializer):
+    rating = serializers.IntegerField(min_value=1, max_value=5)
+    text = serializers.CharField(max_length=500, required=False, allow_blank=True, default="")
+    tags = serializers.ListField(child=serializers.CharField(), required=False, default=list, max_length=6)
+
+    def validate_tags(self, tags):
+        unknown = sorted(set(tags) - REVIEW_TAG_KEYS)
+        if unknown:
+            raise serializers.ValidationError(f"Unknown tags: {', '.join(unknown)}.")
+        return list(dict.fromkeys(tags))
+
+
+class ReportCreateSerializer(serializers.Serializer):
+    reason = serializers.ChoiceField(choices=ReportReason.choices)
+    details = serializers.CharField(max_length=1000, required=False, allow_blank=True, default="")
+
+
+def review_tags():
+    return [{"key": k, "name_en": en, "name_ur": ur} for k, en, ur in REVIEW_TAGS]
+
+
+def report_reasons():
+    return [{"key": k, "name_en": label, "name_ur": REPORT_REASON_UR[k]} for k, label in ReportReason.choices]
 
 
 def booking_payload(booking, user):
@@ -257,6 +311,8 @@ def booking_payload(booking, user):
 
     viewer_role = "customer" if booking.customer_id == user.id else "worker"
     relation = access.OWNER if viewer_role == "customer" else access.ASSIGNED_WORKER
+    review = getattr(booking, "review", None)
+    my_report = booking.reports.filter(reporter=user).first()
     pin = live_pin(booking) if booking.status == "BOOKED" else None
     pin_info = None
     if pin is not None and pin.expires_at > timezone.now():
@@ -274,7 +330,9 @@ def booking_payload(booking, user):
         "checked_in_at": iso(booking.checked_in_at),
         "completed_at": iso(booking.completed_at),
         "viewer": viewer_role,
-        "actions": booking_actions(booking, viewer_role),
+        "actions": booking_actions(booking, viewer_role, review is not None, my_report is not None),
+        "review": review_payload(review) if review else None,
+        "my_report": {"id": my_report.pk, "status": my_report.status} if my_report else None,
         "active_pin": pin_info,  # never contains the PIN itself
         "worker": public_workers([booking.worker_id]).get(booking.worker_id),
         "customer": {"id": booking.customer_id, "username": booking.customer.username},

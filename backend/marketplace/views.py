@@ -2,7 +2,7 @@ from django.http import FileResponse
 from django.shortcuts import get_object_or_404
 from rest_framework import status
 from rest_framework.parsers import FormParser, JSONParser, MultiPartParser
-from rest_framework.permissions import IsAuthenticated
+from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
@@ -11,9 +11,15 @@ from config.api import ApiError, IsCustomer, IsWorker, StandardPagination
 from django.db.models import Count, Prefetch
 
 from . import access, selectors, services
-from .models import Booking, JobRequest, Quote
+from .models import Booking, BookingStatus, JobRequest, Quote, Report, Review
 from .serializers import (
     CheckInSerializer,
+    ReportCreateSerializer,
+    ReviewCreateSerializer,
+    report_payload,
+    report_reasons,
+    review_payload,
+    review_tags,
     DiscoveryQuerySerializer,
     JobRequestCreateSerializer,
     JobRequestSerializer,
@@ -257,3 +263,112 @@ class CompleteView(APIView):
     def post(self, request, pk):
         services.complete(request.user, pk)
         return Response(booking_payload(_visible_booking(request.user, pk), request.user))
+
+
+# ------------------------------------------------- reviews / reports / meta ---
+
+class ReviewTagsView(APIView):
+    permission_classes = [AllowAny]
+    authentication_classes = []
+
+    def get(self, request):
+        return Response(review_tags())
+
+
+class ReportReasonsView(APIView):
+    permission_classes = [AllowAny]
+    authentication_classes = []
+
+    def get(self, request):
+        return Response(report_reasons())
+
+
+class ReviewCreateView(APIView):
+    """POST /api/v1/bookings/<id>/review/ — booking customer, after completion, once."""
+
+    permission_classes = [IsCustomer]
+
+    def post(self, request, pk):
+        serializer = ReviewCreateSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        review = services.create_review(request.user, pk, **serializer.validated_data)
+        return Response(review_payload(review, include_booking=True), status=status.HTTP_201_CREATED)
+
+
+class ReportCreateView(APIView):
+    """POST /api/v1/bookings/<id>/reports/ — either participant reports the other, privately."""
+
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request, pk):
+        serializer = ReportCreateSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        report = services.create_report(request.user, pk, **serializer.validated_data)
+        return Response(report_payload(report), status=status.HTTP_201_CREATED)
+
+
+class MyReportsView(APIView):
+    """GET /api/v1/reports/ — reports the viewer filed (never reports about them)."""
+
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        qs = Report.objects.filter(reporter=request.user)
+        return _paginate(self, request, qs, lambda rows: [report_payload(r) for r in rows])
+
+
+class WorkerPublicView(APIView):
+    """GET /api/v1/workers/<id>/ — public profile with stats and recent reviews."""
+
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request, pk):
+        from workers.models import WorkerProfile
+
+        if not WorkerProfile.objects.complete().filter(pk=pk).exists():
+            raise _not_found()
+        card = public_workers([pk])[pk]
+        reviews = Review.objects.filter(worker_id=pk)[:10]
+        card["recent_reviews"] = [review_payload(r) for r in reviews]
+        return Response(card)
+
+
+class WorkerDashboardView(APIView):
+    """GET /api/v1/workers/me/dashboard/ — everything the worker home screen needs."""
+
+    permission_classes = [IsWorker]
+
+    def get(self, request):
+        from workers.models import WorkerProfile
+
+        user = request.user
+        profile = WorkerProfile.objects.filter(user=user).first()
+        if profile is None:
+            profile_status = "missing"
+        else:
+            profile_status = "complete" if profile.is_complete else "incomplete"
+        stats = selectors.worker_stats([user.id])[user.id]
+        active = (Booking.objects.filter(worker=user, status__in=["BOOKED", "IN_PROGRESS"])
+                  .select_related(*BOOKING_RELATED).first())
+        recent = Booking.objects.filter(worker=user).select_related("job__trade", "job__service_area", "review")[:5]
+        board_count = 0
+        if profile_status == "complete":
+            board_count = access.board_queryset(profile).count()
+        return Response({
+            "profile_status": profile_status,
+            "display_name": profile.display_name if profile else None,
+            "accepting_jobs": profile.accepting_jobs if profile else None,
+            "is_available": profile.is_available if profile else False,
+            "active_booking": booking_payload(active, user) if active else None,
+            "completed_jobs": stats["completed_jobs"],
+            "rating": {"average": stats["rating_avg"], "count": stats["review_count"]},
+            "pending_quotes": Quote.objects.filter(worker=user, job__booking__isnull=True).count(),
+            "open_jobs_matching": board_count,
+            "recent_jobs": [{
+                "booking_id": b.pk, "status": b.status, "amount": f"{b.amount:.2f}", "currency": "PKR",
+                "trade": b.job.trade_id, "service_area": b.job.service_area_id,
+                "booked_at": iso(b.booked_at), "completed_at": iso(b.completed_at),
+                "rating": getattr(getattr(b, "review", None), "rating", None),
+            } for b in recent],
+            "links": {"bookings": "/api/v1/bookings/", "quotes": "/api/v1/quotes/", "job_board": "/api/v1/job-board/"},
+        })
