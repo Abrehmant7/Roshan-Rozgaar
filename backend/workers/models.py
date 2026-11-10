@@ -24,8 +24,9 @@ class WorkerProfileQuerySet(models.QuerySet):
     def available(self):
         """THE availability rule used by discovery, quoting and booking:
         complete profile + accepting jobs + no active booking."""
-        # Phase 5 adds: .exclude(user__worker_bookings__status__in=ACTIVE_BOOKING_STATUSES)
-        return self.complete().filter(accepting_jobs=True)
+        return self.complete().filter(accepting_jobs=True).exclude(
+            user__worker_bookings__status__in=ACTIVE_BOOKING_STATUSES
+        )
 
 
 class WorkerProfile(models.Model):

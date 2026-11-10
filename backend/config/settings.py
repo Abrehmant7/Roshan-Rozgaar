@@ -150,3 +150,9 @@ SCAN_PROOF_TTL_SECONDS = env_int("SCAN_PROOF_TTL_SECONDS", 10 * 60)
 
 # Customer voice notes on job requests (stored under PRIVATE_MEDIA_ROOT).
 VOICE_NOTE_MAX_BYTES = env_int("VOICE_NOTE_MAX_BYTES", 5 * 1024 * 1024)
+
+# Arrival PIN: short-lived, attempt-capped, issuance throttled per booking.
+PIN_TTL_SECONDS = env_int("PIN_TTL_SECONDS", 15 * 60)
+PIN_MAX_ATTEMPTS = env_int("PIN_MAX_ATTEMPTS", 5)
+PIN_ISSUE_LIMIT = env_int("PIN_ISSUE_LIMIT", 5)
+PIN_ISSUE_WINDOW_SECONDS = env_int("PIN_ISSUE_WINDOW_SECONDS", 15 * 60)

@@ -1,4 +1,7 @@
+from decimal import Decimal
+
 from django.conf import settings
+from django.utils import timezone
 from rest_framework import serializers
 from rest_framework.exceptions import ErrorDetail
 
@@ -142,8 +145,138 @@ class JobRequestSerializer(serializers.ModelSerializer):
     def to_representation(self, job):
         data = super().to_representation(job)
         rel = self.context.get("relation")
+        user = self.context.get("user")
         data["viewer"] = rel
         if rel in (access.OWNER, access.ASSIGNED_WORKER):
             data["address_details"] = job.address_details
             data["customer"] = {"id": job.customer_id, "username": job.customer.username}
+        booking = job.booking_or_none
+        data["booking"] = booking_brief(booking) if booking and rel != access.ELIGIBLE_WORKER else None
+        if rel == access.OWNER:
+            if self.context.get("detail"):
+                quotes = list(job.quotes.all())
+                cards = public_workers({q.worker_id for q in quotes})
+                data["quotes"] = [quote_payload(q, cards.get(q.worker_id)) for q in quotes]
+            data["quote_count"] = getattr(job, "quote_count", None)
+            if data["quote_count"] is None:
+                data["quote_count"] = job.quotes.count()
+        elif user is not None:
+            prefetched = getattr(job, "my_quotes", None)  # set by the job board's Prefetch
+            if prefetched is None:
+                mine = job.quotes.filter(worker=user).first()
+            else:
+                mine = prefetched[0] if prefetched else None
+            data["my_quote"] = quote_payload(mine) if mine else None
         return data
+
+
+# ------------------------------------------------------- quotes / bookings ---
+
+def iso(value):
+    return serializers.DateTimeField().to_representation(value) if value else None
+
+
+def money(value):
+    return f"{value:.2f}"
+
+
+def public_workers(user_ids):
+    """{user_id: worker_summary} with stats and live availability, in 3 queries + stats."""
+    from workers.models import WorkerProfile
+
+    from . import selectors
+
+    ids = list(user_ids)
+    if not ids:
+        return {}
+    profiles = selectors.with_public_prefetch(WorkerProfile.objects.filter(user_id__in=ids))
+    available = set(WorkerProfile.objects.available().filter(user_id__in=ids).values_list("pk", flat=True))
+    stats = selectors.worker_stats(ids)
+    cards = {}
+    for profile in profiles:
+        profile.available_now = profile.pk in available
+        cards[profile.pk] = worker_summary(profile, stats.get(profile.pk))
+    return cards
+
+
+def quote_status(quote):
+    booking = quote.job.booking_or_none
+    if booking is None:
+        return "PENDING"
+    return "ACCEPTED" if booking.quote_id == quote.pk else "NOT_SELECTED"
+
+
+def quote_payload(quote, worker_card=None):
+    data = {
+        "id": quote.pk,
+        "job_request": quote.job_id,
+        "amount": money(quote.amount),
+        "currency": "PKR",
+        "message": quote.message,
+        "status": quote_status(quote),
+        "created_at": iso(quote.created_at),
+    }
+    if worker_card is not None:
+        data["worker"] = worker_card
+    return data
+
+
+def booking_brief(booking):
+    return {"id": booking.pk, "status": booking.status, "amount": money(booking.amount), "currency": "PKR"}
+
+
+class QuoteCreateSerializer(serializers.Serializer):
+    amount = serializers.DecimalField(
+        max_digits=10, decimal_places=2, min_value=Decimal("1"), max_value=Decimal("10000000"),
+        help_text="PKR, as a decimal string such as \"1500.00\"",
+    )
+    message = serializers.CharField(max_length=200, required=False, allow_blank=True, default="")
+
+
+class CheckInSerializer(serializers.Serializer):
+    pin = serializers.RegexField(r"^\d{6}$", error_messages={"invalid": "Enter the 6-digit PIN."})
+
+
+def booking_actions(booking, viewer_role):
+    """What the viewer may do right now. React renders controls from this list only."""
+    from .models import BookingStatus
+
+    actions = []
+    if viewer_role == "customer" and booking.status == BookingStatus.BOOKED:
+        actions.append("issue_pin")
+    if viewer_role == "worker":
+        if booking.status == BookingStatus.BOOKED:
+            actions.append("check_in")
+        elif booking.status == BookingStatus.IN_PROGRESS:
+            actions.append("complete")
+    return actions
+
+
+def booking_payload(booking, user):
+    from .services import live_pin
+
+    viewer_role = "customer" if booking.customer_id == user.id else "worker"
+    relation = access.OWNER if viewer_role == "customer" else access.ASSIGNED_WORKER
+    pin = live_pin(booking) if booking.status == "BOOKED" else None
+    pin_info = None
+    if pin is not None and pin.expires_at > timezone.now():
+        pin_info = {
+            "expires_at": iso(pin.expires_at),
+            "attempts_remaining": settings.PIN_MAX_ATTEMPTS - pin.failed_attempts,
+        }
+    return {
+        "id": booking.pk,
+        "status": booking.status,
+        "amount": money(booking.amount),
+        "currency": "PKR",
+        "quote_id": booking.quote_id,
+        "booked_at": iso(booking.booked_at),
+        "checked_in_at": iso(booking.checked_in_at),
+        "completed_at": iso(booking.completed_at),
+        "viewer": viewer_role,
+        "actions": booking_actions(booking, viewer_role),
+        "active_pin": pin_info,  # never contains the PIN itself
+        "worker": public_workers([booking.worker_id]).get(booking.worker_id),
+        "customer": {"id": booking.customer_id, "username": booking.customer.username},
+        "job_request": JobRequestSerializer(booking.job, context={"relation": relation, "user": user}).data,
+    }
