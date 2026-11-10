@@ -4,9 +4,10 @@ A mobile-first, hyper-local marketplace connecting households in Islamabad with 
 trade workers. Customers post jobs and receive quotes, accept one, the worker checks in with a
 one-time arrival PIN, and the customer reviews the completed job.
 
-> **Status — phase 1 (backend foundation).** Django + DRF project connected to PostgreSQL, a
-> custom user model and a health endpoint. Marketplace features, the React/Tailwind client, AI
-> services and seed data arrive in later phases.
+> **Status — phase 2 (accounts + catalog).** Django + DRF on PostgreSQL with session
+> authentication for customers and workers, and a database-driven catalog of trades,
+> specialties and service areas. Worker self-onboarding, jobs, the React/Tailwind client and AI
+> services arrive in later phases.
 
 ## Tech stack
 
@@ -22,9 +23,12 @@ Exact Python package versions are pinned in [backend/requirements.txt](backend/r
 ## Repository layout
 
 ```
-backend/            Django project (manage.py, config/, accounts/, requirements.txt)
-compose.yaml        Local PostgreSQL service
-.env.example        Environment variable template (copy to .env)
+backend/
+  config/      settings, root URLs, /api/v1/ router, health check
+  accounts/    custom User (role: customer | worker), session auth endpoints
+  catalog/     Trade, Specialty, ServiceArea models, public read-only API, seed_catalog
+compose.yaml   Local PostgreSQL service
+.env.example   Environment variable template (copy to .env)
 ```
 
 ## Local setup (Windows PowerShell)
@@ -45,9 +49,10 @@ python -m pip install -r backend\requirements.txt
 # 3. PostgreSQL (Docker Desktop must be running)
 docker compose up -d --wait db
 
-# 4. Database schema
+# 4. Schema, starter catalog and an Admin account
 python backend\manage.py migrate
-python backend\manage.py createsuperuser   # optional, for /admin/
+python backend\manage.py seed_catalog
+python backend\manage.py createsuperuser
 
 # 5. Run Django
 python backend\manage.py runserver
@@ -59,12 +64,25 @@ If `Activate.ps1` is blocked by execution policy, run
 `Set-ExecutionPolicy -Scope CurrentUser RemoteSigned` once, or call `.\.venv\Scripts\python.exe`
 directly. On macOS/Linux use `python3 -m venv .venv` and `source .venv/bin/activate`.
 
+Run the test suite (it creates a temporary `test_<DB_NAME>` database, so the DB user needs
+`CREATEDB`; the Compose user has it):
+
+```powershell
+python backend\manage.py test accounts catalog
+```
+
+### Provision a test worker (until worker onboarding exists)
+
+Public registration only creates customers. To get a worker account:
+**/admin/ → Users → Add user**, enter a username and password, set **Role = Worker**, save.
+`role` is independent of the *Staff* / *Superuser* flags — leave those off for a worker.
+
 ### Using an existing PostgreSQL instead of Docker
 
 Skip step 3 and point the same variables at your server, then create the role and database once:
 
 ```sql
-CREATE ROLE roshan_rozgar LOGIN PASSWORD 'local-dev-password';
+CREATE ROLE roshan_rozgar LOGIN CREATEDB PASSWORD 'local-dev-password';
 CREATE DATABASE roshan_rozgar OWNER roshan_rozgar;
 ```
 
@@ -79,21 +97,123 @@ environment, which takes precedence over `.env`) to match.
 | `DJANGO_DEBUG`                | `true`/`false` (also `1/0`, `yes/no`, `on/off`). Defaults to off. |
 | `DJANGO_ALLOWED_HOSTS`        | Comma-separated host names.                                |
 | `DJANGO_CSRF_TRUSTED_ORIGINS` | Comma-separated origins, e.g. the Vite dev server.         |
+| `DJANGO_SECURE_COOKIES`       | `true` behind HTTPS: marks session and CSRF cookies `Secure`. Default `false`. |
 | `DB_NAME`, `DB_USER`, `DB_PASSWORD`, `DB_HOST`, `DB_PORT` | PostgreSQL connection; also initialise the Compose container. |
 
-## API conventions
+## API
 
-- Versioned API under `/api/v1/`; Django Admin at `/admin/`.
-- Session authentication with CSRF protection; endpoints require login unless marked public.
-- The React client will call relative URLs (`/api/v1/...`) through a Vite dev proxy in
-  development and same-origin routing in deployment.
-- `GET /api/v1/health/` (public) runs `SELECT 1` against PostgreSQL. Returns `200`
-  `{"status":"ok","database":"ok"}`, or `503` `{"status":"unavailable","database":"unavailable"}`
-  without connection details.
+All routes are under `/api/v1/`; Django Admin is at `/admin/`. Responses are JSON. Errors use
+DRF's shape: field errors as `{"field": ["message"]}`, anything else as `{"detail": "message"}`.
+
+| Method | Path | Auth | Behaviour |
+| ------ | ---- | ---- | --------- |
+| GET  | `/api/v1/health/` | public | `200 {"status":"ok","database":"ok"}` or `503` |
+| GET  | `/api/v1/auth/csrf/` | public | `200 {"csrf_token":"…"}`, sets the `csrftoken` cookie, not cacheable |
+| POST | `/api/v1/auth/register/` | public + CSRF | Body `{"username","password"}` only. Creates a **customer**, signs in, `201` user |
+| POST | `/api/v1/auth/login/` | public + CSRF | Body `{"username","password"}`. Either role. `200` user |
+| GET  | `/api/v1/auth/me/` | session | `200` user; `403` when signed out |
+| POST | `/api/v1/auth/logout/` | CSRF | Ends the session, `204` |
+| GET  | `/api/v1/catalog/trades/` | public | Active trades |
+| GET  | `/api/v1/catalog/trades/<trade_id>/specialties/` | public | Active specialties of an active trade; `404` if the trade is unknown or retired |
+| GET  | `/api/v1/catalog/service-areas/` | public | Active service areas |
+
+A **user** is always exactly `{"id": 3, "username": "ustad_akram", "role": "worker"}`.
+
+Registration rejects any other field (e.g. `role`, `is_staff`) with
+`400 {"role": ["This field is not allowed."]}`; the role is always set by the server. Usernames
+and passwords go through Django's validators; a taken username (case-insensitive) returns
+`400 {"username": ["A user with that username already exists."]}`. Wrong username, wrong password
+and inactive accounts all return the same `400 {"detail": "Invalid username or password."}`.
+A missing or stale CSRF token returns `403 {"detail": "CSRF verification failed. …"}`.
+
+Catalog payloads (sorted by `sort_order`, then English name; service areas by city first):
+
+```json
+GET /api/v1/catalog/trades/
+[{"id": 1, "slug": "plumbing", "name_en": "Plumbing", "name_ur": "پلمبنگ", "icon_key": "droplet"}, …]
+
+GET /api/v1/catalog/trades/1/specialties/
+[{"id": 1, "trade": 1, "slug": "leak-repair", "name_en": "Leak repair", "name_ur": "لیکیج کی مرمت"}, …]
+
+GET /api/v1/catalog/service-areas/
+[{"id": 1, "city": "Islamabad", "sector_code": "G-11", "name_en": "G-11", "name_ur": "جی-11"}, …]
+```
+
+Use `id` as the stable reference; every trade, including ones added later in Admin, is served
+from the same paths, so the frontend needs no change when staff add a trade.
+
+### React session sequence
+
+The session cookie is `HttpOnly` and never read by JavaScript. Use relative URLs (`/api/v1/...`)
+so requests go through the Vite proxy in development and stay same-origin in deployment.
+
+1. `GET /api/v1/auth/csrf/` → keep `csrf_token` in memory.
+2. `POST` login or register with headers `Content-Type: application/json` and
+   `X-CSRFToken: <token>`.
+3. **Fetch a fresh token** with `GET /api/v1/auth/csrf/` — Django rotates it on login.
+4. Send `X-CSRFToken` on every later `POST`/`PUT`/`PATCH`/`DELETE`, including logout.
+5. On app load, call `GET /api/v1/auth/me/`: `200` means signed in, `403` means signed out.
+
+```js
+async function csrf() {
+  return (await (await fetch("/api/v1/auth/csrf/")).json()).csrf_token;
+}
+
+export async function login(username, password) {
+  const res = await fetch("/api/v1/auth/login/", {
+    method: "POST",
+    headers: { "Content-Type": "application/json", "X-CSRFToken": await csrf() },
+    body: JSON.stringify({ username, password }),
+  });
+  const body = await res.json();
+  if (!res.ok) throw body;      // {"detail": ...} or {"field": [...]}
+  return body;                  // {id, username, role}; fetch a fresh token before the next POST
+}
+```
+
+The Vite proxy for `/api` should keep `changeOrigin: true`; the dev origin
+(`http://localhost:5173`) is listed in `DJANGO_CSRF_TRUSTED_ORIGINS`.
+
+### Trying it from PowerShell
+
+```powershell
+$api = "http://127.0.0.1:8000/api/v1"
+$s = New-Object Microsoft.PowerShell.Commands.WebRequestSession
+$t = (Invoke-RestMethod "$api/auth/csrf/" -WebSession $s).csrf_token
+Invoke-RestMethod "$api/auth/login/" -Method Post -WebSession $s -ContentType "application/json" `
+  -Headers @{ "X-CSRFToken" = $t } -Body '{"username":"ustad_akram","password":"<password>"}'
+Invoke-RestMethod "$api/auth/me/" -WebSession $s
+$t = (Invoke-RestMethod "$api/auth/csrf/" -WebSession $s).csrf_token   # rotated after login
+Invoke-RestMethod "$api/auth/logout/" -Method Post -WebSession $s -Headers @{ "X-CSRFToken" = $t }
+Invoke-RestMethod "$api/catalog/trades/"
+```
+
+### HTTPS deployment
+
+Serve React and the API from the same origin. Then set `DJANGO_DEBUG=false`,
+`DJANGO_SECURE_COOKIES=true` (adds `Secure` to the session and CSRF cookies),
+`DJANGO_ALLOWED_HOSTS=<your host>` and `DJANGO_CSRF_TRUSTED_ORIGINS=https://<your host>`. If TLS
+is terminated by a proxy, it must forward `X-Forwarded-Proto` and Django needs
+`SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")` (not yet set).
+
+## Catalog administration
+
+Trades, specialties and service areas are database records edited in **/admin/ → Catalog**.
+
+- **Retire, don't delete:** untick *Is active* to hide an entry from the API. A trade that still
+  has specialties cannot be deleted at all.
+- Specialty slugs are unique within their trade. Sector codes are normalized on save
+  (`g 11`, `G11`, `g_11` → `G-11`) and must be unique per city (case-insensitive).
+- `python backend\manage.py seed_catalog` is safe to re-run: it creates only missing entries
+  (matched by trade slug, trade + specialty slug, city + sector code) and never changes
+  existing ones, so Admin edits and retirements are kept.
 
 ## Seeded / mocked data
 
-None yet. Seed data for workers, jobs and reviews will be added and listed here.
+- `seed_catalog` creates starter trades — Plumbing, Electrical, AC Repair, Carpentry — with 3–4
+  sample specialties each, and Islamabad sectors G-11, G-13 and I-10. Urdu names are starter
+  translations and should be reviewed by a native speaker.
+- No users, workers, jobs or reviews are seeded yet. Test workers are created by hand in Admin.
 
 ## AI services and tools
 
@@ -102,7 +222,8 @@ None yet. Seed data for workers, jobs and reviews will be added and listed here.
 
 ## Known limitations
 
-- Phase 1 only: no marketplace models or account endpoints yet.
+- No worker self-onboarding, jobs, quotes or reviews yet.
+- No login rate limiting or account lockout yet.
 - `runserver` checks migrations at startup, so PostgreSQL must be reachable when Django starts.
   If the database goes down afterwards, `/api/v1/health/` returns `503` within about 5 seconds
   (`connect_timeout`).

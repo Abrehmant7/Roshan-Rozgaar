@@ -1,6 +1,8 @@
 import logging
 
 from django.db import connection
+from django.http import JsonResponse
+from django.views.csrf import csrf_failure as django_csrf_failure
 from rest_framework import status
 from rest_framework.permissions import AllowAny
 from rest_framework.response import Response
@@ -28,3 +30,13 @@ class HealthView(APIView):
                 status=status.HTTP_503_SERVICE_UNAVAILABLE,
             )
         return Response({"status": "ok", "database": "ok"})
+
+
+def csrf_failure(request, reason=""):
+    """JSON 403 for API clients; Django's normal HTML page everywhere else (e.g. Admin)."""
+    if request.path.startswith("/api/"):
+        return JsonResponse(
+            {"detail": "CSRF verification failed. Fetch /api/v1/auth/csrf/ and send X-CSRFToken."},
+            status=403,
+        )
+    return django_csrf_failure(request, reason=reason)

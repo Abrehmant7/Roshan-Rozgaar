@@ -21,6 +21,17 @@ ALLOWED_HOSTS = env_list("DJANGO_ALLOWED_HOSTS")
 # (http://localhost:5173) when it proxies /api to Django.
 CSRF_TRUSTED_ORIGINS = env_list("DJANGO_CSRF_TRUSTED_ORIGINS")
 
+# Session + CSRF cookies. The React client never reads the session cookie
+# (HttpOnly); it gets the CSRF token from GET /api/v1/auth/csrf/.
+# Secure cookies stay off for local HTTP; set DJANGO_SECURE_COOKIES=true
+# when the site is served over HTTPS.
+SESSION_COOKIE_HTTPONLY = True
+SESSION_COOKIE_SAMESITE = "Lax"
+CSRF_COOKIE_SAMESITE = "Lax"
+SESSION_COOKIE_SECURE = env_bool("DJANGO_SECURE_COOKIES", default=False)
+CSRF_COOKIE_SECURE = SESSION_COOKIE_SECURE
+CSRF_FAILURE_VIEW = "config.views.csrf_failure"
+
 INSTALLED_APPS = [
     "django.contrib.admin",
     "django.contrib.auth",
@@ -30,6 +41,7 @@ INSTALLED_APPS = [
     "django.contrib.staticfiles",
     "rest_framework",
     "accounts",
+    "catalog",
 ]
 
 MIDDLEWARE = [

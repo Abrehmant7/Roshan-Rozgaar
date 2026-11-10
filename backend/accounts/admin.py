@@ -1,6 +1,14 @@
 from django.contrib import admin
-from django.contrib.auth.admin import UserAdmin
+from django.contrib.auth.admin import UserAdmin as DjangoUserAdmin
 
 from .models import User
 
-admin.site.register(User, UserAdmin)
+_MARKETPLACE = ("Marketplace", {"fields": ("role",)})
+
+
+@admin.register(User)
+class UserAdmin(DjangoUserAdmin):
+    fieldsets = (*DjangoUserAdmin.fieldsets, _MARKETPLACE)
+    add_fieldsets = (*DjangoUserAdmin.add_fieldsets, _MARKETPLACE)
+    list_display = (*DjangoUserAdmin.list_display, "role")
+    list_filter = ("role", *DjangoUserAdmin.list_filter)
