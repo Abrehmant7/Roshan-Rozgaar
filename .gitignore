@@ -21,7 +21,10 @@ backend/private_media/
 backend/staticfiles/
 *.log
 
-# Node (frontend, later)
+# Browser test output
+scripts/e2e/shots/
+
+# Node (frontend)
 node_modules/
 dist/
 

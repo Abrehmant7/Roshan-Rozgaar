@@ -1,263 +1,247 @@
 # Roshan Rozgar (روزگار روشن)
 
-A mobile-first, hyper-local marketplace connecting households in Islamabad with nearby skilled
-trade workers. Customers post jobs and receive quotes, accept one, the worker checks in with a
-one-time arrival PIN, and the customer reviews the completed job.
+A mobile-first, hyper-local marketplace that connects households in Islamabad with nearby skilled
+trade workers — electricians, plumbers, AC technicians, carpenters — built for workers who do not
+read or type comfortably.
 
-> **Status — phase 7 (backend complete).** Accounts, catalog, OCR-assisted worker onboarding,
-> discovery, job requests with voice notes, quotes, bookings with arrival PIN, reviews, reports and
-> the worker dashboard work end to end through the API. Contract: [docs/API.md](docs/API.md);
-> captured samples: [docs/api-samples.md](docs/api-samples.md). The React client is next.
+- **Workers** sign in with a staff-provisioned account, photograph their ID card (OCR fills in and
+  verifies their identity), pick trades, skills and sectors by tapping icons, and toggle whether they
+  are taking work. They browse nearby jobs, listen to voice notes, quote with preset amounts, check
+  in with the customer's PIN and mark the job done.
+- **Customers** pick a trade and sector, see available verified workers ranked by skill match and
+  rating, post a job by typing and/or recording a voice note, compare quotes, accept one, share a
+  one-time arrival PIN, and review the job afterwards.
+- **Either side** can privately report the other; **staff** manage the catalog and the report queue
+  in Django Admin.
+
+The UI is Urdu-first (right-to-left, Noto Nastaliq Urdu) with an English toggle.
+
+## How the five required outcomes are met
+
+| Outcome | How |
+| --- | --- |
+| 1. Onboarding without a sign-up form | ID-card photo → OCR → fictional registry match → name pre-filled; trades, skills and areas are icon tiles; experience is a +/− stepper. Nothing needs typing. |
+| 2. Discovery | Trade + sector tiles → only **available** workers (complete profile, taking jobs, not on a job), specialty matches first, then rating. |
+| 3. Communication | Customer posts text and/or a recorded voice note; workers listen in the app and quote with preset amounts and tap-to-choose messages. |
+| 4. Booking | Accepting a quote creates a booking in a locked PostgreSQL transaction; one active booking per worker is a DB constraint, so search and the job board update immediately. A 6-digit arrival PIN confirms the worker is at the door. |
+| 5. Trust | Reviews (stars + quick tags) only after completion; ratings and completed-job counts are computed from real bookings; private two-way reports go to a staff queue. |
+
+## Use of AI — and what is simulated
+
+| Component | Barrier it removes | Status |
+| --- | --- | --- |
+| **ID-card OCR** (server-side adapter, `backend/workers/ocr.py`) | Literacy: a worker creates a verified profile from one photo instead of filling a form. Without it, onboarding falls back to typing a name and ID number. | **Mock mode is what runs in the demo** (`OCR_MODE=mock`): it returns fixed text for fictional cards and the UI shows a "simulated demo scan" label. **Live mode is implemented but not verified** — the team's PicToText endpoint contract and credentials were not available in the repository, so the adapter's request/response shape is configurable by env vars (`OCR_ENDPOINT`, `OCR_API_KEY`, `OCR_API_KEY_HEADER`, `OCR_IMAGE_FIELD`, `OCR_TEXT_FIELD`, `OCR_TIMEOUT_SECONDS`) and covered only by mocked-network tests. |
+| Urdu read-aloud | Literacy: speaker buttons read headings aloud | Uses the browser's built-in speech synthesis; shown only when the device has an Urdu voice. No external service. |
+
+There is **no speech recognition**: voice notes are recorded and played back for a human to listen
+to, not transcribed. Identity verification against government databases is out of scope; the
+"registry" is a fictional list (`backend/workers/identity.py`). **AI coding assistant:** Claude
+Code (Anthropic, model Claude Opus) wrote and tested this code with the team.
 
 ## Tech stack
 
-| Layer    | Choice                                                        |
-| -------- | ------------------------------------------------------------- |
-| Language | Python 3.13 (developed on 3.13.7)                             |
-| Backend  | Django 5.2 LTS, Django REST Framework, Psycopg 3              |
-| Database | PostgreSQL 17 (official `postgres:17` Docker image)           |
-| Frontend | React + Tailwind (planned; Vite dev proxy to `/api`)          |
+| Layer | Choice |
+| --- | --- |
+| Backend | Python 3.13 (3.13.7), Django 5.2 LTS, Django REST Framework 3.18, Psycopg 3 |
+| Database | PostgreSQL 17 (official `postgres:17` image via `compose.yaml`) |
+| Frontend | React 18, React Router 6, Tailwind CSS 4, Vite 6, lucide-react icons, Noto Nastaliq Urdu (via @fontsource, bundled locally) |
+| Auth | Django sessions (HttpOnly cookie) + CSRF, same origin |
 
-Exact Python package versions are pinned in [backend/requirements.txt](backend/requirements.txt).
-
-## Repository layout
+Versions are pinned in [backend/requirements.txt](backend/requirements.txt) and
+[frontend/package-lock.json](frontend/package-lock.json).
 
 ```
 backend/
-  config/      settings, root URLs, /api/v1/ router, health check
-  accounts/    custom User (role: customer | worker), session auth endpoints
-  catalog/     Trade, Specialty, ServiceArea models, public read-only API, seed_catalog
-compose.yaml   Local PostgreSQL service
-.env.example   Environment variable template (copy to .env)
+  config/       settings, URLs (API, Admin, built SPA), shared API errors/permissions
+  accounts/     User with role customer|worker; session auth endpoints
+  catalog/      Trade, Specialty, ServiceArea (+ seed_catalog)
+  workers/      WorkerProfile, ID scan (OCR adapter, fictional registry), scan proofs
+  marketplace/  JobRequest + voice notes, discovery, Quote, Booking, ArrivalPin, Review,
+                Report, worker dashboard, seed_demo
+frontend/       React app (worker + customer screens)
+docs/           API contract and captured request/response samples
+scripts/        API sample capture, browser end-to-end tests
 ```
 
-## Local setup (Windows PowerShell)
+## Prerequisites
 
-Run everything from the repository root.
+Python 3.13, Node 20+ (developed on 24.12), and either Docker Desktop or an existing PostgreSQL
+16+ server. Commands below are for Windows PowerShell from the repository root.
+
+## Setup
 
 ```powershell
-# 1. Environment file
+# 1. Environment
 Copy-Item .env.example .env
-# Edit .env: set DJANGO_SECRET_KEY, and change DB_PORT (e.g. 5433) if something
-# already listens on 5432, such as a native PostgreSQL install.
+# Edit .env: set DJANGO_SECRET_KEY. If something already listens on 5432 (e.g. a native
+# PostgreSQL), set DB_PORT=5433 for the Docker database.
 
-# 2. Python dependencies
+# 2. Backend dependencies
 py -3.13 -m venv .venv
 .\.venv\Scripts\Activate.ps1
 python -m pip install -r backend\requirements.txt
 
-# 3. PostgreSQL (Docker Desktop must be running)
+# 3. PostgreSQL
 docker compose up -d --wait db
 
-# 4. Schema and fictional demo data (catalog, demo accounts, sample jobs)
+# 4. Schema and fictional demo data (idempotent; never overwrites existing data)
 python backend\manage.py migrate
 python backend\manage.py seed_demo
 
-# 5. Run Django
-python backend\manage.py runserver
+# 5. Frontend
+cd frontend; npm install; npm run build; cd ..
 ```
 
-### Frontend (React + Tailwind, `frontend/`)
+If `Activate.ps1` is blocked, run `Set-ExecutionPolicy -Scope CurrentUser RemoteSigned` once or
+call `.\.venv\Scripts\python.exe` directly.
+
+**Existing PostgreSQL instead of Docker:** skip step 3, create the role and database once
+(`CREATE ROLE roshan_rozgar LOGIN CREATEDB PASSWORD '…'; CREATE DATABASE roshan_rozgar OWNER
+roshan_rozgar;`) and point `DB_HOST`, `DB_PORT`, `DB_NAME`, `DB_USER`, `DB_PASSWORD` at it.
+Process environment variables override `.env`.
+
+## Run
 
 ```powershell
-cd frontend
-npm install
-npm run dev      # http://localhost:5173 — proxies /api to Django on 127.0.0.1:8000
-# or, one origin served by Django itself:
-npm run build    # writes frontend/dist; restart runserver, then open http://127.0.0.1:8000/
+python backend\manage.py runserver        # app + API + Admin on http://127.0.0.1:8000/
 ```
 
-Requires Node 20+ (developed on Node 24.12). Use the same host consistently in development
+With the frontend built, Django serves everything from one origin: the app at `/`, the API at
+`/api/v1/`, Admin at `/admin/`. Restart `runserver` after the first `npm run build`.
+
+For frontend development with hot reload, also run `cd frontend; npm run dev` and open
+<http://localhost:5173> — Vite proxies `/api` to Django. Use one host consistently
 (`localhost:5173` and `127.0.0.1:5173` are both CSRF-trusted in `.env.example`).
 
-Then open <http://127.0.0.1:8000/api/v1/health/> — expect `{"status":"ok","database":"ok"}`.
+Health check: <http://127.0.0.1:8000/api/v1/health/> → `{"status":"ok","database":"ok"}`.
 
-If `Activate.ps1` is blocked by execution policy, run
-`Set-ExecutionPolicy -Scope CurrentUser RemoteSigned` once, or call `.\.venv\Scripts\python.exe`
-directly. On macOS/Linux use `python3 -m venv .venv` and `source .venv/bin/activate`.
-
-Run the test suite (it creates a temporary `test_<DB_NAME>` database, so the DB user needs
-`CREATEDB`; the Compose user has it):
+## Test
 
 ```powershell
-python backend\manage.py test accounts catalog workers marketplace
+python backend\manage.py check
+python backend\manage.py test accounts catalog workers marketplace   # 83 tests, real PostgreSQL
+cd frontend; npm run build; cd ..
 ```
 
-(Pass the app labels: run from the repo root, plain `manage.py test` discovers nothing.)
+Pass the app labels when running from the repo root. Tests create a temporary `test_<DB_NAME>`
+database (the Compose user has `CREATEDB`). They include PostgreSQL concurrency races (competing
+quote acceptances, one worker booked on two requests at once).
 
-### Demo accounts (local, demo-only)
+Browser end-to-end tests (phone-sized, two independent sessions) drive the real UI and API. They
+need Playwright (`pip install playwright`) and Microsoft Edge, and they create data, so run them
+against a demo database:
 
-`seed_demo` creates fictional accounts that all use the password `RozgarDemo#2026`
+```powershell
+python backend\manage.py seed_demo --reset-onboarding
+python scripts\e2e\two_role_walkthrough.py http://127.0.0.1:8000
+python backend\manage.py seed_demo --reset-onboarding
+python scripts\e2e\worker_flow.py http://127.0.0.1:8000
+```
+
+## Demo accounts (local, demo-only)
+
+`seed_demo` creates **fictional** accounts that all use the password `RozgarDemo#2026`
 (override with `--password` or `DEMO_PASSWORD`). It refuses to run with `DJANGO_DEBUG` off.
 
 | Username | Role | State |
 | --- | --- | --- |
 | `demo_ayesha` | customer | no history — use for the live walkthrough |
-| `demo_bilal` | customer | past completed jobs with reviews; one open carpentry request in G-13 |
-| `demo_imran` | worker | **fresh** — onboard with the ID scan (mock returns "Imran Ali") |
+| `demo_bilal` | customer | completed jobs with reviews; one open carpentry request in G-13 |
+| `demo_imran` | worker | **fresh** — onboard live; any photo gives "Imran Ali" (mock card-5) |
 | `demo_tariq` | worker | fresh spare — name the photo `card-6.jpg` for "Tariq Javed" |
-| `demo_akram` | worker | ready: Electrical (wiring, fans), G-11/G-13, rated 4.5 from 2 jobs |
-| `demo_naveed` | worker | ready: AC repair + Electrical, G-11/I-10 |
-| `demo_rashid` | worker | ready: Plumbing, G-11/G-13/I-10 |
-| `demo_sajid` | worker | ready: Carpentry, G-13/F-10 |
-| `demo_staff` | staff | Django Admin: catalog, report queue |
+| `demo_akram` | worker | ready: Electrical (wiring, fans), G-11 / G-13, 4.5★ from 2 jobs |
+| `demo_naveed` | worker | ready: AC repair + Electrical, G-11 / I-10, 4★ |
+| `demo_rashid` | worker | ready: Plumbing, G-11 / G-13 / I-10, 5★ |
+| `demo_sajid` | worker | ready: Carpentry, G-13 / F-10, new worker |
+| `demo_staff` | staff | Django Admin: catalog, users, report queue |
 
-Re-run onboarding later with `python backend\manage.py seed_demo --reset-onboarding`
-(removes only the profiles of `demo_imran` and `demo_tariq`). Nothing else is ever overwritten.
+To show onboarding again: `python backend\manage.py seed_demo --reset-onboarding` (removes only
+the profiles of `demo_imran` and `demo_tariq`). New worker accounts are created by staff in
+**Admin → Users → Add user** with **Role = Worker** (public sign-up always creates customers).
 
-### Provision a test worker (until worker onboarding exists)
+## Demo walkthrough (two phones or two browser windows)
 
-Public registration only creates customers. To get a worker account:
-**/admin/ → Users → Add user**, enter a username and password, set **Role = Worker**, save.
-`role` is independent of the *Staff* / *Superuser* flags — leave those off for a worker.
-
-### Using an existing PostgreSQL instead of Docker
-
-Skip step 3 and point the same variables at your server, then create the role and database once:
-
-```sql
-CREATE ROLE roshan_rozgar LOGIN CREATEDB PASSWORD 'local-dev-password';
-CREATE DATABASE roshan_rozgar OWNER roshan_rozgar;
-```
-
-Set `DB_HOST`, `DB_PORT`, `DB_NAME`, `DB_USER` and `DB_PASSWORD` in `.env` (or in the process
-environment, which takes precedence over `.env`) to match.
+1. **Worker** (`demo_imran`): "میں کاریگر ہوں" → log in → "پروفائل بنائیں" → take/choose any photo →
+   the yellow *simulated demo scan* label and "Imran Ali" appear → confirm → tap *Electrical*,
+   optionally *Wiring*, tap *G-11* → save. Status: available.
+2. **Customer** (`demo_ayesha`): "مجھے کاریگر چاہیے" → log in → tap *Electrical*, *Wiring*, *G-11* —
+   Imran (skill match) and Akram/Naveed appear → "کام کی درخواست بھیجیں" → type a line and record a
+   voice note (or choose an audio file if the microphone is blocked) → send.
+3. **Worker**: *New jobs* → open the request → play the voice note → tap *1500* and a message →
+   send quote.
+4. **Customer**: *My requests* → the request → *Accept*. Search again: Imran is gone (busy).
+5. **Customer**: on the booking, "آمد کا PIN بنائیں" → read the 6 digits to the worker.
+6. **Worker**: Home → current job → enter the PIN on the keypad (try a wrong one first) →
+   *In progress* → "کام مکمل ہو گیا" twice → completed; Imran is available again.
+7. **Customer**: rate 5 stars + a tag; optionally *Report a problem*. **Worker** can report too.
+8. **Staff** (`demo_staff` at `/admin/`): *Marketplace → Reports* → filter *Open* → select →
+   *Mark selected reports resolved*. *Catalog → Trades → Add* a new trade: it appears in the app
+   on reload with no code change.
+9. Repeat a booking in another trade (e.g. carpentry with `demo_tariq` in G-13) — same screens.
 
 ## Configuration
 
-| Variable                      | Purpose                                                    |
-| ----------------------------- | ---------------------------------------------------------- |
-| `DJANGO_SECRET_KEY`           | Required.                                                  |
-| `DJANGO_DEBUG`                | `true`/`false` (also `1/0`, `yes/no`, `on/off`). Defaults to off. |
-| `DJANGO_ALLOWED_HOSTS`        | Comma-separated host names.                                |
-| `DJANGO_CSRF_TRUSTED_ORIGINS` | Comma-separated origins, e.g. the Vite dev server.         |
-| `DJANGO_SECURE_COOKIES`       | `true` behind HTTPS: marks session and CSRF cookies `Secure`. Default `false`. |
-| `DB_NAME`, `DB_USER`, `DB_PASSWORD`, `DB_HOST`, `DB_PORT` | PostgreSQL connection; also initialise the Compose container. |
+| Variable | Purpose |
+| --- | --- |
+| `DJANGO_SECRET_KEY` | Required. Also keys the identity digests and PIN digests. |
+| `DJANGO_DEBUG` | `true`/`false` (also `1/0`, `yes/no`, `on/off`). Default off. |
+| `DJANGO_ALLOWED_HOSTS` | Comma-separated host names. |
+| `DJANGO_CSRF_TRUSTED_ORIGINS` | Comma-separated origins (e.g. the Vite dev server). |
+| `DJANGO_SECURE_COOKIES` | `true` behind HTTPS (Secure session/CSRF cookies). Default `false`. |
+| `DB_NAME`, `DB_USER`, `DB_PASSWORD`, `DB_HOST`, `DB_PORT` | PostgreSQL; also initialise the Compose container. |
+| `OCR_MODE` | `mock` (default) or `live`. |
+| `OCR_ENDPOINT`, `OCR_API_KEY`, `OCR_API_KEY_HEADER`, `OCR_IMAGE_FIELD`, `OCR_TEXT_FIELD`, `OCR_TIMEOUT_SECONDS` | Live OCR provider (server-side only; the key never reaches the browser). |
+| `OCR_MAX_IMAGE_BYTES`, `OCR_SCAN_RATE`, `SCAN_PROOF_TTL_SECONDS` | Scan limits (5 MB, 30/hour, 10 min). |
+| `VOICE_NOTE_MAX_BYTES` | Voice note cap (5 MB). |
+| `PIN_TTL_SECONDS`, `PIN_MAX_ATTEMPTS`, `PIN_ISSUE_LIMIT`, `PIN_ISSUE_WINDOW_SECONDS` | Arrival PIN: 15 min, 5 tries, 5 PINs per 15 min. |
+| `PRIVATE_MEDIA_ROOT` | Where voice notes are stored (default `backend/private_media/`, never served publicly). |
+| `DEMO_PASSWORD` | Password for `seed_demo` accounts. |
 
 ## API
 
-All routes are under `/api/v1/`; Django Admin is at `/admin/`. Responses are JSON. Errors use
-DRF's shape: field errors as `{"field": ["message"]}`, anything else as `{"detail": "message"}`.
+Contract: [docs/API.md](docs/API.md) — every route, field, status, action and error code, upload
+field names (`image`, `voice_note`) and the CSRF sequence. Real captured request/response pairs:
+[docs/api-samples.md](docs/api-samples.md) (regenerate with `scripts/capture_api_samples.py`
+against a throwaway database).
 
-| Method | Path | Auth | Behaviour |
-| ------ | ---- | ---- | --------- |
-| GET  | `/api/v1/health/` | public | `200 {"status":"ok","database":"ok"}` or `503` |
-| GET  | `/api/v1/auth/csrf/` | public | `200 {"csrf_token":"…"}`, sets the `csrftoken` cookie, not cacheable |
-| POST | `/api/v1/auth/register/` | public + CSRF | Body `{"username","password"}` only. Creates a **customer**, signs in, `201` user |
-| POST | `/api/v1/auth/login/` | public + CSRF | Body `{"username","password"}`. Either role. `200` user |
-| GET  | `/api/v1/auth/me/` | session | `200` user; `403` when signed out |
-| POST | `/api/v1/auth/logout/` | CSRF | Ends the session, `204` |
-| GET  | `/api/v1/catalog/trades/` | public | Active trades |
-| GET  | `/api/v1/catalog/trades/<trade_id>/specialties/` | public | Active specialties of an active trade; `404` if the trade is unknown or retired |
-| GET  | `/api/v1/catalog/service-areas/` | public | Active service areas |
+Mapping kept from earlier phases: the brief's "job request" is `JobRequest` at
+`/api/v1/job-requests/`; worker discovery is `GET /api/v1/workers/`; the worker board is
+`GET /api/v1/job-board/`; booking statuses are `BOOKED`, `IN_PROGRESS`, `COMPLETED`, and an
+unbooked request reports `OPEN`.
 
-A **user** is always exactly `{"id": 3, "username": "ustad_akram", "role": "worker"}`.
+## Seeded and mocked — everything here is fictional
 
-Registration rejects any other field (e.g. `role`, `is_staff`) with
-`400 {"role": ["This field is not allowed."]}`; the role is always set by the server. Usernames
-and passwords go through Django's validators; a taken username (case-insensitive) returns
-`400 {"username": ["A user with that username already exists."]}`. Wrong username, wrong password
-and inactive accounts all return the same `400 {"detail": "Invalid username or password."}`.
-A missing or stale CSRF token returns `403 {"detail": "CSRF verification failed. …"}`.
-
-Catalog payloads (sorted by `sort_order`, then English name; service areas by city first):
-
-```json
-GET /api/v1/catalog/trades/
-[{"id": 1, "slug": "plumbing", "name_en": "Plumbing", "name_ur": "پلمبنگ", "icon_key": "droplet"}, …]
-
-GET /api/v1/catalog/trades/1/specialties/
-[{"id": 1, "trade": 1, "slug": "leak-repair", "name_en": "Leak repair", "name_ur": "لیکیج کی مرمت"}, …]
-
-GET /api/v1/catalog/service-areas/
-[{"id": 1, "city": "Islamabad", "sector_code": "G-11", "name_en": "G-11", "name_ur": "جی-11"}, …]
-```
-
-Use `id` as the stable reference; every trade, including ones added later in Admin, is served
-from the same paths, so the frontend needs no change when staff add a trade.
-
-### React session sequence
-
-The session cookie is `HttpOnly` and never read by JavaScript. Use relative URLs (`/api/v1/...`)
-so requests go through the Vite proxy in development and stay same-origin in deployment.
-
-1. `GET /api/v1/auth/csrf/` → keep `csrf_token` in memory.
-2. `POST` login or register with headers `Content-Type: application/json` and
-   `X-CSRFToken: <token>`.
-3. **Fetch a fresh token** with `GET /api/v1/auth/csrf/` — Django rotates it on login.
-4. Send `X-CSRFToken` on every later `POST`/`PUT`/`PATCH`/`DELETE`, including logout.
-5. On app load, call `GET /api/v1/auth/me/`: `200` means signed in, `403` means signed out.
-
-```js
-async function csrf() {
-  return (await (await fetch("/api/v1/auth/csrf/")).json()).csrf_token;
-}
-
-export async function login(username, password) {
-  const res = await fetch("/api/v1/auth/login/", {
-    method: "POST",
-    headers: { "Content-Type": "application/json", "X-CSRFToken": await csrf() },
-    body: JSON.stringify({ username, password }),
-  });
-  const body = await res.json();
-  if (!res.ok) throw body;      // {"detail": ...} or {"field": [...]}
-  return body;                  // {id, username, role}; fetch a fresh token before the next POST
-}
-```
-
-The Vite proxy for `/api` should keep `changeOrigin: true`; the dev origin
-(`http://localhost:5173`) is listed in `DJANGO_CSRF_TRUSTED_ORIGINS`.
-
-### Trying it from PowerShell
-
-```powershell
-$api = "http://127.0.0.1:8000/api/v1"
-$s = New-Object Microsoft.PowerShell.Commands.WebRequestSession
-$t = (Invoke-RestMethod "$api/auth/csrf/" -WebSession $s).csrf_token
-Invoke-RestMethod "$api/auth/login/" -Method Post -WebSession $s -ContentType "application/json" `
-  -Headers @{ "X-CSRFToken" = $t } -Body '{"username":"ustad_akram","password":"<password>"}'
-Invoke-RestMethod "$api/auth/me/" -WebSession $s
-$t = (Invoke-RestMethod "$api/auth/csrf/" -WebSession $s).csrf_token   # rotated after login
-Invoke-RestMethod "$api/auth/logout/" -Method Post -WebSession $s -Headers @{ "X-CSRFToken" = $t }
-Invoke-RestMethod "$api/catalog/trades/"
-```
-
-### HTTPS deployment
-
-Serve React and the API from the same origin. Then set `DJANGO_DEBUG=false`,
-`DJANGO_SECURE_COOKIES=true` (adds `Secure` to the session and CSRF cookies),
-`DJANGO_ALLOWED_HOSTS=<your host>` and `DJANGO_CSRF_TRUSTED_ORIGINS=https://<your host>`. If TLS
-is terminated by a proxy, it must forward `X-Forwarded-Proto` and Django needs
-`SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")` (not yet set).
-
-## Catalog administration
-
-Trades, specialties and service areas are database records edited in **/admin/ → Catalog**.
-
-- **Retire, don't delete:** untick *Is active* to hide an entry from the API. A trade that still
-  has specialties cannot be deleted at all.
-- Specialty slugs are unique within their trade. Sector codes are normalized on save
-  (`g 11`, `G11`, `g_11` → `G-11`) and must be unique per city (case-insensitive).
-- `python backend\manage.py seed_catalog` is safe to re-run: it creates only missing entries
-  (matched by trade slug, trade + specialty slug, city + sector code) and never changes
-  existing ones, so Admin edits and retirements are kept.
-
-## Seeded / mocked data
-
-- `seed_catalog` creates starter trades — Plumbing, Electrical, AC Repair, Carpentry — with 3–4
-  sample specialties each, and Islamabad sectors G-11, G-13 and I-10. Urdu names are starter
-  translations and should be reviewed by a native speaker.
-- No users, workers, jobs or reviews are seeded yet. Test workers are created by hand in Admin.
-
-## AI services and tools
-
-- **Runtime AI services:** none yet; each will be listed here when added.
-- **AI coding assistant:** Claude Code (Anthropic) was used to scaffold this backend.
+- **Catalog** (`seed_catalog`): Plumbing, Electrical, AC Repair, Carpentry with 3–4 specialties
+  each; Islamabad sectors G-11, G-13, I-10, F-10, G-9, I-8. Urdu labels are starter translations.
+- **Demo data** (`seed_demo`): the accounts above, four ready worker profiles marked as
+  *simulated verification*, four completed past jobs with reviews, one open carpentry request.
+- **OCR**: mock mode with fixtures chosen by file-name keyword — `card-1`…`card-6` (fictional
+  registry cards; default `card-5`), `blurry` (unreadable), `unregistered` (not in registry),
+  `ocr-error` (provider failure). All IDs use the non-existent `00000-` prefix. The image and raw
+  ID number are never stored, logged or returned (only a masked form and a keyed digest).
+- **Identity registry**: a hard-coded fictional list, standing in for a government lookup.
+- **Payments**: none. The agreed price is recorded; money changes hands outside the app.
 
 ## Known limitations
 
-- No worker self-onboarding, jobs, quotes or reviews yet.
-- No login rate limiting or account lockout yet.
-- `runserver` checks migrations at startup, so PostgreSQL must be reachable when Django starts.
-  If the database goes down afterwards, `/api/v1/health/` returns `503` within about 5 seconds
-  (`connect_timeout`).
+- Live OCR is untested against a real provider (see *Use of AI*).
+- Voice notes are not transcribed or translated; no speech recognition.
+- Location is manual sector selection; no maps or distance ranking. One city (Islamabad) is seeded.
+- No cancellation flow: a booking stuck in `BOOKED` (e.g. a no-show) is corrected by staff in
+  Admin → Bookings; the customer can file a `no_show` report.
+- Updates arrive by polling (8–15 s), not push notifications.
+- No login rate limiting or lockout (scan, PIN issue and PIN guesses are limited).
+- Urdu read-aloud depends on the device having an Urdu voice; many desktop browsers do not.
+- Worker accounts are provisioned by staff; there is no self-service worker sign-up or password reset.
+- The Figma prototype was not available to the developer, so the visual design is original and
+  only follows the brief's written guidance (mobile-first, Urdu RTL, large tap targets).
+- `runserver` needs PostgreSQL reachable at start-up; `/api/v1/health/` reports `503` if it later
+  drops. For HTTPS deployment set `DJANGO_DEBUG=false`, `DJANGO_SECURE_COOKIES=true`, proper
+  `DJANGO_ALLOWED_HOSTS` / `DJANGO_CSRF_TRUSTED_ORIGINS`, serve `/static/` (e.g. `collectstatic`
+  behind a web server) and, behind a TLS proxy, `SECURE_PROXY_SSL_HEADER`.
+
+## Credits
+
+Open-source libraries: Django, Django REST Framework, Psycopg, React, React Router, Vite,
+Tailwind CSS, lucide-react (ISC), Noto Nastaliq Urdu font (SIL Open Font License, via
+@fontsource), Playwright (tests only). No templates or prior-project code were used.
